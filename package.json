@@ -1,0 +1,26 @@
+{
+  "name": "affiliate-automation",
+  "version": "1.0.0",
+  "description": "Sistema de automação de afiliados multi-canal (Telegram -> WhatsApp)",
+  "type": "module",
+  "main": "src/app.js",
+  "scripts": {
+    "start": "node src/app.js",
+    "check": "for f in src/*.js src/affiliates/*.js; do node --check $f; done",
+    "status": "node src/status.js"
+  },
+  "dependencies": {
+    "@wppconnect-team/wppconnect": "^2.3.3",
+    "axios": "^1.7.4",
+    "better-sqlite3": "^11.3.0",
+    "dotenv": "^16.4.5",
+    "telegram": "^2.26.3"
+  },
+  "overrides": {
+    "puppeteer": "^25.11.0",
+    "puppeteer-core": "^25.11.0"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
