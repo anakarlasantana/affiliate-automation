@@ -13,7 +13,7 @@ import { NewMessage } from 'telegram/events/index.js';
 
 import config from './config.js';
 import { jaFoiEnviada, registrarEnvio } from './database.js';
-import { expandirLink, sanitizarUrl, extrairPrimeiroLink, desembrulharVerificacaoMeli } from './linkResolver.js';
+import { expandirLink, sanitizarUrl, extrairPrimeiroLink, extrairLinks, desembrulharVerificacaoMeli, desembrulharAfiliadoRedirecionador, extrairProdutoDePaginaSocialMeli, extrairImagemProduto } from './linkResolver.js';
 import { converterParaAfiliado } from './affiliates/index.js';
 import { SendQueue } from './sendQueue.js';
 import fs from 'node:fs';
@@ -23,37 +23,119 @@ import path from 'node:path';
 /** Fila global de envios (ritmo anti-ban por horário) */
 let filaEnvio = null;
 
+/**
+ * "Mergulhadores": quando o link expandido é uma página intermediária
+ * (perfil, vitrine, landing) em vez da página do produto, esses resolvedores
+ * baixam a página e extraem a URL real do produto do HTML/JSON embutido.
+ *
+ * Para suportar um novo site/loja, basta incluir um objeto:
+ *   { nome, matches: (url) => bool, extrair: async (url) => urlDoProduto|null }
+ */
+const MERGULHADORES = [
+  {
+    nome: 'Mercado Livre Social (meli.la)',
+    matches: (url) => url.includes('mercadolivre.com.br/social/'),
+    extrair: extrairProdutoDePaginaSocialMeli,
+  },
+];
+
 /* ================= Pipeline de ofertas ================= */
 
 async function processarOferta(textoOriginal, origem, wppClient, imagemBase64 = null) {
   try {
-    const linkCru = extrairPrimeiroLink(textoOriginal);
-    if (!linkCru) {
+    // Percorre TODOS os links da mensagem ate achar um link de produto
+    // convertivel. Links de perfil grupal (meli.la -> /social/...), landing
+    // pages e links sem afiliacao sao pulados.
+    const linksEncontrados = extrairLinks(textoOriginal);
+    if (linksEncontrados.length === 0) {
       console.log(`   ↷ [${origem}] Sem link na mensagem (texto: "${(textoOriginal || '').slice(0, 60)}...") — ignorando.`);
       return;
     }
 
-    console.log(`\n🔗 [${origem}] Link capturado: ${linkCru}`);
+    const NAO_EH_PRODUTO = [
+      'mercadolivre.com.br/social/',  // perfil do grupo/creator no ML
+      'mercadolivre.com.br/m/vitrine',
+      'shopee.com.br/m/',             // landing de cupom Shopee
+      'linktr.ee/',
+    ];
 
-    const urlExpandida = desembrulharVerificacaoMeli(await expandirLink(linkCru));
-    const urlLimpa = sanitizarUrl(urlExpandida);
-    console.log(`   ↳ URL limpa: ${urlLimpa}`);
+    let linkCru = null, urlLimpa = null, meuLink = null, loja = null;
+    for (const linkTentativa of linksEncontrados) {
+      console.log(`
+🔗 [${origem}] Tentando link: ${linkTentativa}`);
+      try {
+        // Expande encurtador → desembrulha verificacao do ML → desembrulha
+        // links de redes de afiliados (Awin, Lomadee...) até a loja real.
+        const urlExpandida = desembrulharAfiliadoRedirecionador(
+          desembrulharVerificacaoMeli(await expandirLink(linkTentativa))
+        );
+        let urlTentativa = sanitizarUrl(urlExpandida);
+        console.log(`   ↳ URL limpa: ${urlTentativa}`);
 
-    if (jaFoiEnviada(urlLimpa)) {
-      console.log('   ↳ Duplicada — ignorada.');
-      return;
+        // Páginas intermediárias (perfil/vitrine/social) que não são produto,
+        // mas que podemos "mergulhar" para extrair o produto real do HTML.
+        // Para suportar um novo site, basta adicionar uma entrada em
+        // MERGULHADORES (matcher + extrator), sem mexer no resto do pipeline.
+        for (const mergulhador of MERGULHADORES) {
+          if (!mergulhador.matches(urlTentativa)) continue;
+          console.log(`   ↳ Página intermediária (${mergulhador.nome}) — buscando o produto dentro dela...`);
+          const urlProduto = await mergulhador.extrair(urlExpandida);
+          if (!urlProduto) {
+            console.log(`   ↷ Produto nao encontrado em ${mergulhador.nome} — tentando proximo link...`);
+            urlTentativa = '';
+            break;
+          }
+          urlTentativa = urlExpandida === urlProduto ? urlTentativa : sanitizarUrl(urlProduto);
+          console.log(`   ↳ Produto extraído: ${urlTentativa}`);
+          break;
+        }
+        if (!urlTentativa) continue;
+
+        if (NAO_EH_PRODUTO.some((trecho) => urlTentativa.includes(trecho))) {
+          console.log('   ↷ Nao e link de produto (perfil/landing) — tentando proximo link...');
+          continue;
+        }
+        if (jaFoiEnviada(urlTentativa)) {
+          console.log('   ↳ Duplicada — tentando proximo link...');
+          continue;
+        }
+
+        const conv = await converterParaAfiliado(urlTentativa, urlExpandida);
+        if (!conv.meuLink || conv.loja === 'sem-provider' || conv.loja === 'desconhecida') {
+          console.log(`   ↷ Sem conversao de afiliado para ${new URL(urlTentativa).hostname} — tentando proximo link...`);
+          continue;
+        }
+        linkCru = linkTentativa;
+        urlLimpa = urlTentativa;
+        meuLink = conv.meuLink;
+        loja = conv.loja;
+        break;
+      } catch (erroLink) {
+        console.log('   ↷ Falha ao resolver este link (' + erroLink.message + ') — tentando proximo...');
+      }
     }
 
-    const { meuLink, loja } = await converterParaAfiliado(urlLimpa, urlExpandida);
-    if (!meuLink) {
-      console.log('   ↷ Conversão falhou ou credencial ausente — ignorando.');
-      return;
-    }
-    if (loja === 'sem-provider' || loja === 'desconhecida') {
-      console.log(`   ↷ Loja sem afiliação configurada (${new URL(urlLimpa).hostname}) — ignorando.`);
+    if (!linkCru) {
+      console.log('   ↷ Nenhum link de produto utilizavel na mensagem — ignorando.');
       return;
     }
     console.log(`   ↳ [${loja}] Meu link: ${meuLink}`);
+
+    // Fallback de imagem: se a mensagem original nao trouxe foto baixavel,
+    // pega a foto oficial do produto na pagina da loja (og:image) — generico,
+    // funciona para qualquer e-commerce.
+    if (!imagemBase64) {
+      try {
+        imagemBase64 = await extrairImagemProduto(urlTentativa);
+        if (imagemBase64) {
+          console.log(`   🖼️  Foto do produto obtida da página da loja (${Math.round(imagemBase64.length / 1024)} KB)`);
+        } else {
+          console.log('   🖼️  Sem foto (nem na mensagem, nem na página da loja) — enviando só texto.');
+        }
+      } catch (e) {
+        console.warn(`   ⚠️  Erro ao buscar foto do produto: ${e.message}`);
+      }
+    }
 
     // Deduplica tambem pelo link final (sem query): o mesmo produto pode
     // chegar por links/encurtadores diferentes.
@@ -101,7 +183,7 @@ async function processarOferta(textoOriginal, origem, wppClient, imagemBase64 = 
 
     // Rodape com o link do SEU grupo (substitui a divulgacao removida)
     if (config.whatsapp.meuGrupoLink) {
-      mensagemFinal += '\n\n📢 Entre no nosso grupo de ofertas:\n' + config.whatsapp.meuGrupoLink;
+      mensagemFinal += '\n\n📢 Compartilhe o nosso grupo de ofertas:\n' + config.whatsapp.meuGrupoLink;
     }
 
     // Entra na fila anti-ban (envio sequencial, delay dinâmico por horário)
@@ -112,7 +194,7 @@ async function processarOferta(textoOriginal, origem, wppClient, imagemBase64 = 
       chaveFinal,
       wppClient,
       imagemBase64,
-      loja: afiliado ? afiliado.loja.nome : 'desconhecida',
+      loja: loja,
       titulo: primeiraLinha.slice(0, 80),
     });
   } catch (erro) {
@@ -338,7 +420,7 @@ async function main() {
   console.log('\n🎯 Sistema ativo. Monitorando ofertas...\n');
 
   // Retoma envios que ficaram pendentes de execucoes anteriores
-  filaEnvio.restaurarPendentes();
+  filaEnvio.restaurarPendentes({ wppClient });
 }
 
 main().catch((erro) => {

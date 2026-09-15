@@ -159,3 +159,169 @@ export function extrairPrimeiroLink(texto) {
   const match = texto.match(/https?:\/\/[^\s<>()"'`]+/i);
   return match ? match[0] : null;
 }
+
+/**
+ * Extrai TODOS os links http(s) de um texto (na ordem).
+ * @param {string} texto
+ * @returns {string[]}
+ */
+export function extrairLinks(texto) {
+  if (!texto) return [];
+  return texto.match(/https?:\/\/[^\s<>()"'`]+/gi) || [];
+}
+
+/**
+ * Desembrulha links de REDES de afiliados/redirectores (Awin, Lomadee, etc.)
+ * que escondem a URL real da loja em um parâmetro da query (ued, url, target...).
+ * Genérico: funciona com qualquer domínio cujo parâmetro aponte para outra URL http(s).
+ * Aplica-se em cadeia (até 3 níveis: um redirector pode embrulhar outro).
+ *
+ * @param {string} url URL possivelmente embrulhada
+ * @returns {string} URL real da loja (ou a original se nada encontrado)
+ */
+export function desembrulharAfiliadoRedirecionador(url) {
+  const PARAMS_DESTINO = ['ued', 'url', 'u', 'target', 'destination', 'dest', 'go', 'to', 'redirect', 'link'];
+  let atual = url;
+  for (let nivel = 0; nivel < 3; nivel++) {
+    let proxima = null;
+    try {
+      const u = new URL(atual);
+      for (const param of PARAMS_DESTINO) {
+        const valor = u.searchParams.get(param);
+        if (!valor || !/^https?:\/\//i.test(valor)) continue;
+        const destino = new URL(valor);
+        // nunca desembrulha para o mesmo host (evita loops tipo ?url=<self>)
+        if (destino.hostname !== u.hostname) {
+          proxima = destino.toString();
+          break;
+        }
+      }
+    } catch {
+      break;
+    }
+    if (!proxima) break;
+    console.log(`   ↳ Link de afiliado desembrulhado: ...${proxima.slice(0, 90)}`);
+    atual = proxima;
+  }
+  return atual;
+}
+
+/**
+ * Extrai a FOTO DO PRODUTO da página da loja, como fallback quando a
+ * mensagem original não traz imagem baixável. Usa as meta tags padrão
+ * da web (og:image / twitter:image) — por isso funciona de forma genérica
+ * para Mercado Livre, Shopee, Amazon, Magalu e praticamente qualquer
+ * e-commerce.
+ *
+ * @param {string} urlProduto URL da página do produto (sem params de tracking)
+ * @returns {Promise<string|null>} imagem em data URL (base64) ou null
+ */
+export async function extrairImagemProduto(urlProduto) {
+  try {
+    // Algumas lojas (ex.: Mercado Livre) só servem as meta tags de preview
+    // para crawlers de link-preview (Facebook/WhatsApp). Tentamos os dois UAs.
+    const UAS = [
+      'WhatsApp/2',
+      'facebookexternalhit/1.1 (+http://www.facebook.com/externalhit_uatext.php)',
+      USER_AGENT,
+    ];
+    let html = '';
+    for (const ua of UAS) {
+      try {
+        const resposta = await axios.get(urlProduto, {
+          timeout: 12000,
+          maxRedirects: 5,
+          headers: { 'User-Agent': ua, Accept: 'text/html,*/*' },
+          validateStatus: (s) => s >= 200 && s < 400,
+        });
+        html = typeof resposta.data === 'string' ? resposta.data : '';
+        if (html && /og:image|twitter:image/i.test(html)) break;
+      } catch { /* tenta o próximo UA */ }
+    }
+    if (!html) return null;
+
+    // meta tags de preview: og:image / twitter:image (com property antes ou
+    // depois do content, aspas simples ou duplas)
+    const padroes = [
+      /<meta[^>]+(?:property|name)=["'](?:og:image|twitter:image)["'][^>]+content=["']([^"']+)["']/i,
+      /<meta[^>]+content=["']([^"']+)["'][^>]+(?:property|name)=["'](?:og:image|twitter:image)["']/i,
+    ];
+    let urlImagem = null;
+    for (const padrao of padroes) {
+      const m = html.match(padrao);
+      if (m && m[1]) { urlImagem = m[1]; break; }
+    }
+    if (!urlImagem) return null;
+
+    // URLs relativas/protocol-relative
+    if (urlImagem.startsWith('//')) urlImagem = 'https:' + urlImagem;
+    else if (urlImagem.startsWith('/')) urlImagem = new URL(urlProduto).origin + urlImagem;
+    if (!/^https?:\/\//i.test(urlImagem)) return null;
+
+    const img = await axios.get(urlImagem, {
+      timeout: 12000,
+      responseType: 'arraybuffer',
+      headers: { 'User-Agent': USER_AGENT, Accept: 'image/*,*/*' },
+      validateStatus: (s) => s >= 200 && s < 400,
+    });
+    const contentType = String(img.headers['content-type'] || 'image/jpeg').split(';')[0];
+    if (!contentType.startsWith('image/')) return null;
+
+    return `data:${contentType};base64,${Buffer.from(img.data).toString('base64')}`;
+  } catch (erro) {
+    console.warn(`   ⚠️  Falha ao buscar foto do produto: ${erro.message}`);
+    return null;
+  }
+}
+
+/**
+ * As páginas "sociais" do Mercado Livre (mercadolivre.com.br/social/<perfil>,
+ * para onde apontam os meli.la compartilhados pelo app) não são links de
+ * produto, mas o HTML delas contém os deep links dos produtos exibidos
+ * (no formato percent-encoded ou \u002F-escaped). Esta função baixa a página
+ * e extrai o primeiro produto (MLB-...) encontrado.
+ *
+ * @param {string} urlSocial URL da página social (ou do encurtador original)
+ * @returns {Promise<string|null>} URL canônica do produto ou null
+ */
+export async function extrairProdutoDePaginaSocialMeli(urlSocial) {
+  try {
+    const resposta = await axios.get(urlSocial, {
+      timeout: 15000,
+      maxRedirects: 5,
+      headers: {
+        'User-Agent':
+          'Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Mobile Safari/537.36',
+        Accept: 'text/html,*/*',
+      },
+      validateStatus: (s) => s >= 200 && s < 400,
+    });
+    const html = typeof resposta.data === 'string' ? resposta.data : '';
+    if (!html.includes('MLB')) return null;
+
+    // 1) URL completa de produto embutida na página (slug sempre termina em _JM)
+    const mSlug = html.match(/(MLB-\d+[\w-]*?_JM)/i);
+    if (mSlug) {
+      const janela = html.slice(mSlug.index, mSlug.index + 300);
+      const mVariacao = janela.match(/searchVariation(?:%3D|=)(\d+)/i);
+      let url = 'https://www.mercadolivre.com.br/' + mSlug[1];
+      if (mVariacao) url += '?searchVariation=' + mVariacao[1];
+      return url;
+    }
+
+    // 2) Apenas o ID do item (paginas que embutem somente JSON: item_id / items)
+    const mItem =
+      html.match(/item_id[^"<]{0,25}?MLB(\d{6,})/i) ||
+      html.match(/\\?"id\\?":\s*\\?"(MLB\d{6,})\\?"/) ||
+      html.match(/MLB(\d{6,})/);
+    if (mItem) {
+      const id = mItem[1].replace(/\D/g, '');
+      console.log('   ↳ ID extraído do JSON da página social: MLB' + id);
+      return 'https://produto.mercadolivre.com.br/MLB-' + id + '-_JM';
+    }
+    return null;
+  } catch (erro) {
+    console.warn(`⚠️  Falha ao extrair produto da página social: ${erro.message}`);
+    return null;
+  }
+}

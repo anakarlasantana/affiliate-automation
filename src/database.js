@@ -77,8 +77,10 @@ const stmtFilaRemove = db.prepare('DELETE FROM fila_envio WHERE id = ?');
  * Persiste um item na fila (sobrevive a reinicio do app).
  * @returns {number} id da linha (usado para remover apos o envio).
  */
-export function enfileirarDb({ loja = '', titulo = '', mensagem, urlLimpa = '', chaveFinal = '', imagemBase64 = null }) {
-  return stmtFilaInsere.run(loja, titulo, mensagem, urlLimpa, chaveFinal, imagemBase64).lastInsertRowid;
+export function enfileirarDb({ loja = '', titulo = '', mensagem = null, mensagemFinal = null, urlLimpa = '', chaveFinal = '', imagemBase64 = null }) {
+  const texto = mensagem || mensagemFinal;
+  if (!texto) throw new Error('enfileirarDb: item sem texto de mensagem (mensagem/mensagemFinal vazios)');
+  return stmtFilaInsere.run(loja, titulo, texto, urlLimpa, chaveFinal, imagemBase64).lastInsertRowid;
 }
 
 /** Lista os itens pendentes da fila, na ordem de chegada. */

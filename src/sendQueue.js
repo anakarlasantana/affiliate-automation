@@ -69,10 +69,15 @@ export class SendQueue {
    * Restaura do banco os envios pendentes de execucoes anteriores.
    * Chamar no boot, apos o WhatsApp conectar.
    */
-  restaurarPendentes() {
+  /**
+   * @param {object} contexto campos injetados nos itens restaurados
+   *   (ex.: { wppClient }) — a sessao antiga nao sobrevive ao reinicio.
+   */
+  restaurarPendentes(contexto = {}) {
     const pendentes = listarFilaDb();
     for (const row of pendentes) {
       this.enqueue({
+        ...contexto,
         dbId: row.id,
         loja: row.loja,
         titulo: row.titulo,
