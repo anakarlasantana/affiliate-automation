@@ -7,7 +7,6 @@
  *   AFFILIATE_GENERIC_1=dominio.com:parametro:valor
  */
 import { AffiliateProvider } from './base.js';
-import config from '../config.js';
 
 export class GenericProvider extends AffiliateProvider {
   /**

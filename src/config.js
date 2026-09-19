@@ -4,6 +4,99 @@
  * Qualquer novo afiliado/genérico deve ser lido aqui.
  */
 import 'dotenv/config';
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+/* ================= Caminhos absolutos ================= */
+/**
+ * Derivados do proprio arquivo: o app se comporta igual iniciado de qualquer
+ * diretorio de trabalho (nohup, pm2, systemd, cron). Vale inclusive para o
+ * perfil do Chrome — que antes era criado relativo ao cwd e, se o app subisse
+ * de outro lugar, nascia vazio (pedindo QR de novo).
+ */
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+export const ROOT_DIR = path.resolve(__dirname, '..');
+export const DATA_DIR = path.join(ROOT_DIR, 'data');
+export const TOKENS_DIR = path.join(ROOT_DIR, 'tokens');
+for (const dir of [DATA_DIR, TOKENS_DIR]) {
+  try {
+    fs.mkdirSync(dir, { recursive: true });
+  } catch {
+    // Sem permissao: o doctor reporta isso de forma explicita.
+  }
+}
+
+/* ================= Fuso de operacao ================= */
+/**
+ * O anti-ban decide "pico" e "madrugada" pela HORA DO DIA e o limite diario
+ * pela VIRADA DO DIA. Num servidor em UTC (padrao em VPS) isso dispararia os
+ * envios na madrugada errada — por isso o fuso e explicito e independente do
+ * relogio do host.
+ */
+const TZ_PADRAO = 'America/Sao_Paulo';
+const tzOperacao = process.env.TZ_OPERACAO || process.env.TZ || TZ_PADRAO;
+process.env.TZ = tzOperacao;
+
+/** Hora (0-23) no fuso de operacao. */
+export function horaOperacional(data = new Date()) {
+  const hora = new Intl.DateTimeFormat('en-US', {
+    timeZone: tzOperacao,
+    hour12: false,
+    hour: '2-digit',
+  })
+    .formatToParts(data)
+    .find((parte) => parte.type === 'hour')?.value;
+  return Number(hora ?? 0) % 24;
+}
+
+/** Deslocamento (minutos) do fuso de operacao em relacao ao UTC. */
+function offsetOperacional(data = new Date()) {
+  const partes = Object.fromEntries(
+    new Intl.DateTimeFormat('en-US', {
+      timeZone: tzOperacao,
+      hour12: false,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+    })
+      .formatToParts(data)
+      .map((p) => [p.type, p.value])
+  );
+  const comoUtc = Date.UTC(
+    +partes.year,
+    +partes.month - 1,
+    +partes.day,
+    Number(partes.hour) % 24,
+    +partes.minute,
+    +partes.second
+  );
+  return Math.round((comoUtc - data.getTime()) / 60000);
+}
+
+/**
+ * Inicio do dia no fuso de operacao, no mesmo formato que o SQLite grava em
+ * CURRENT_TIMESTAMP (UTC): "YYYY-MM-DD HH:MM:SS".
+ */
+export function inicioDoDiaOperacional(data = new Date()) {
+  const partes = Object.fromEntries(
+    new Intl.DateTimeFormat('en-US', {
+      timeZone: tzOperacao,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    })
+      .formatToParts(data)
+      .map((p) => [p.type, p.value])
+  );
+  const meiaNoiteEmUtc =
+    Date.UTC(+partes.year, +partes.month - 1, +partes.day, 0, 0, 0) -
+    offsetOperacional(data) * 60000;
+  return new Date(meiaNoiteEmUtc).toISOString().slice(0, 19).replace('T', ' ');
+}
 
 function lista(envValue) {
   return (envValue || '')
@@ -41,6 +134,15 @@ function validarObrigatorias(campos) {
 }
 
 const config = {
+  caminhos: {
+    root: ROOT_DIR,
+    data: DATA_DIR,
+    tokens: TOKENS_DIR,
+  },
+  operacao: {
+    /** Fuso usado nas janelas de envio e na virada do dia (anti-ban) */
+    tz: tzOperacao,
+  },
   telegram: {
     apiId: parseInt(process.env.TELEGRAM_API_ID || '0', 10),
     apiHash: process.env.TELEGRAM_API_HASH || '',
@@ -52,6 +154,24 @@ const config = {
     gruposMonitorados: lista(process.env.GRUPOS_WHATSAPP_MONITORADOS),
     /** Link de convite do SEU grupo (chat.whatsapp.com/...) — divulgado no rodape das ofertas */
     meuGrupoLink: process.env.MEU_GRUPO_LINK || '',
+    /** Nome da sessao = pasta dentro de tokens/ */
+    sessao: process.env.WPP_SESSAO || 'affiliate-automation',
+    /** Binario do Chrome/Chromium ('' = detecta automaticamente no boot) */
+    chromePath: process.env.CHROME_PATH || '',
+    /**
+     * Versao do WhatsApp Web:
+     *   'auto'   -> fixa a versao mais recente embutida no wppconnect (recomendado:
+     *               evita o fallback para a versao live, que quebra a injecao)
+     *   'latest' -> nao fixa nada (usa a versao live do WhatsApp Web)
+     *   ou a versao exata, ex.: '2.3000.1047455456-alpha'
+     */
+    webVersion: process.env.WHATSAPP_WEB_VERSION || 'auto',
+    /** Segundos que a pagina espera o QR ser escaneado (0 = nunca fecha) */
+    timeoutQrMs: Math.max(0, parseInt(process.env.WPP_TIMEOUT_QR || '300', 10)) * 1000,
+    /** Segundos maximos aguardando a sincronizacao do dispositivo (backlog) */
+    deviceSyncMs: Math.max(0, parseInt(process.env.WPP_DEVICE_SYNC_TIMEOUT || '900', 10)) * 1000,
+    /** Tentativas de conexao antes de desistir */
+    tentativas: Math.max(1, parseInt(process.env.WPP_TENTATIVAS || '3', 10)),
   },
   antiban: {
     /** Limite máximo de ofertas enviadas por dia (0 = sem limite) */
@@ -72,6 +192,8 @@ const config = {
     shopee: {
       appId: process.env.SHOPEE_APP_ID || '',
       secret: process.env.SHOPEE_SECRET || '',
+      /** Marca d'água (subId) dos short links gerados — antes era fixo no código */
+      subId: process.env.SHOPEE_SUB_ID || '',
     },
     amazon: {
       tag: process.env.AMAZON_TAG || '',

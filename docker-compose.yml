@@ -1,0 +1,23 @@
+services:
+  affiliate-automation:
+    build: .
+    image: affiliate-automation:latest
+    container_name: affiliate-automation
+    restart: unless-stopped
+    init: true
+    # O perfil do Chrome (sessao) e o banco PRECISAM ser volumes: sem isso cada
+    # recriacao do container pede um QR Code novo.
+    volumes:
+      - ./tokens:/app/tokens
+      - ./data:/app/data
+      - ./.env:/app/.env:ro
+    environment:
+      TZ: America/Sao_Paulo
+      CHROME_PATH: /usr/bin/chromium
+    # Chrome precisa de shm maior que os 64 MB padrao do Docker
+    shm_size: "1gb"
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"

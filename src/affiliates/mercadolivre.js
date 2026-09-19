@@ -17,6 +17,7 @@
 import axios from 'axios';
 import { AffiliateProvider } from './base.js';
 import config from '../config.js';
+import { extrairProdutoDePaginaSocialMeli } from '../linkResolver.js';
 
 const USER_AGENT =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 ' +
@@ -86,6 +87,33 @@ function aplicarTracking(urlDestino, affiliateId) {
 export class MercadoLivreProvider extends AffiliateProvider {
   static dominios = ['mercadolivre.com.br', 'mercadolivre.com', 'meli.la', 'mercadolibre.com'];
   static nome = 'MercadoLivre';
+  static credenciaisRequeridas = ['MELI_AFFILIATE_ID'];
+
+  /**
+   * Mercado Livre tem DOIS formatos de link que precisam de tratamento:
+   *  - produto canônico: /p/MLB123... ou MLB-1234567890-_JM
+   *  - vitrine/perfil:   /social/<slug> (meli.la compartilhado pelo app) →
+   *    não é produto, mas o HTML esconde o MLB do item (mergulhador).
+   */
+  static perfil = {
+    urlNaoProduto: [/\/social\//i, /\/m\/vitrine/i, /\/lists(\/|$)/i, /\/categorias?(\/|$)/i],
+    mergulhador: {
+      nome: 'Mercado Livre Social (meli.la)',
+      matches: (url) => url.includes('mercadolivre.com.br/social/'),
+      extrair: extrairProdutoDePaginaSocialMeli,
+    },
+    idProduto: (url) => {
+      const mlbId = extrairMlbId(url.toString());
+      return mlbId ? `meli:${mlbId}` : null;
+    },
+    /**
+     * matt_* é o tracking de afiliado de qualquer divulgador — sempre sai
+     * (o nosso é aplicado depois). `ref` também sai, mas a URL ORIGINAL é
+     * usada para achar o produto, então isso não atrapalha.
+     * searchVariation é a VARIAÇÃO do produto: preservado de propósito.
+     */
+    paramsRemover: [/^matt_/i, /^ref_?$/i, /^quantity$/i, /^wid$/i, /^pdp_filters$/i],
+  };
 
   /**
    * @param {string} urlLimpa URL ja sanitizada (sem trackers)

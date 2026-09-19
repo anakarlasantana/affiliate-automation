@@ -10,6 +10,19 @@ import config from '../config.js';
 export class MagaluProvider extends AffiliateProvider {
   static dominios = ['magazineluiza.com.br', 'magalu.com', 'magazinevoce.com.br'];
   static nome = 'Magalu';
+  static credenciaisRequeridas = ['MAGALU_STORE_ID'];
+
+  /** Magalu: o produto é identificado pelo id depois de /p/<id>. */
+  static perfil = {
+    urlNaoProduto: [/\/busca(\/|\?|$)/i, /\/categoria\//i, /\/ofertas-do-dia/i],
+    mergulhador: null,
+    idProduto: (url) => {
+      const m = url.pathname.match(/\/p\/([^/]+)/);
+      return m ? `magalu:${m[1]}` : null;
+    },
+    /** itag = tag de campanha; offer_id/pid variam por vitrine de terceiro */
+    paramsRemover: [/^itag$/i, /^pid$/i, /^offer_id$/i, /^partner_id$/i],
+  };
 
   async converter(urlLimpa) {
     const loja = config.afiliados.magalu.loja;

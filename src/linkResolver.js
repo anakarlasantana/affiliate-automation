@@ -16,6 +16,8 @@ const PARAMS_MOALDITOS = [
   /^subid\d*$/i, /^fbclid$/i, /^gclid$/i, /^aff_/i, /^matt_/i,
   /^affiliate/i, /^share_/i, /^af_siteid$/i, /^af_tran_id$/i, /^af_id$/i,
   /^vj$/i, /^sck$/i, /^_ims$/i, /^scm$/i, /^spm$/i, /^force flush$/i,
+  /^gclsrc$/i, /^msclkid$/i, /^_gl$/i, /^mc_eid$/i, /^mc_cid$/i,
+  /^vero_id$/i, /^wickedid$/i, /^igshid$/i, /^yclid$/i, /^_openstat$/i,
 ];
 
 /** Domínios de tracking/ads que nunca são o destino real da oferta. */
@@ -31,7 +33,7 @@ const TRACKER_REGEX =
  * @param {string} urlBase URL da página analisada
  * @returns {string|null} URL de destino ou null
  */
-export function extrairRedirectJS(html, urlBase) {
+function extrairRedirectJS(html, urlBase) {
   if (!html || typeof html !== 'string') return null;
 
   let hostBase = '';
@@ -133,31 +135,23 @@ export function desembrulharVerificacaoMeli(url) {
 /**
  * Remove query strings de tracking/afiliados de terceiros.
  * @param {string} urlFinal
+ * @param {RegExp[]} paramsExtras padrões específicos da loja (ver perfil da
+ *   loja em affiliates/, ex.: `smtt` da Shopee, `pf_rd_*` da Amazon)
  * @returns {string} URL limpa.
  */
-export function sanitizarUrl(urlFinal) {
+export function sanitizarUrl(urlFinal, paramsExtras = []) {
   try {
     const url = new URL(urlFinal);
     for (const chave of [...url.searchParams.keys()]) {
-      if (PARAMS_MOALDITOS.some((regex) => regex.test(chave))) {
-        url.searchParams.delete(chave);
-      }
+      const remover =
+        PARAMS_MOALDITOS.some((regex) => regex.test(chave)) ||
+        paramsExtras.some((regex) => regex.test(chave));
+      if (remover) url.searchParams.delete(chave);
     }
     return url.toString();
   } catch {
     return urlFinal;
   }
-}
-
-/**
- * Extrai o primeiro link http(s) de um texto.
- * @param {string} texto
- * @returns {string|null}
- */
-export function extrairPrimeiroLink(texto) {
-  if (!texto) return null;
-  const match = texto.match(/https?:\/\/[^\s<>()"'`]+/i);
-  return match ? match[0] : null;
 }
 
 /**

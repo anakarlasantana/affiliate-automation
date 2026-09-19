@@ -3,15 +3,10 @@
  * Deduplicação de ofertas com SQLite (better-sqlite3).
  */
 import Database from 'better-sqlite3';
-import { mkdirSync } from 'node:fs';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { DATA_DIR, inicioDoDiaOperacional } from './config.js';
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const dataDir = path.resolve(__dirname, '..', 'data');
-mkdirSync(dataDir, { recursive: true });
-
-const db = new Database(path.join(dataDir, 'ofertas.db'));
+const db = new Database(path.join(DATA_DIR, 'ofertas.db'));
 db.pragma('journal_mode = WAL');
 
 db.exec(`
@@ -31,30 +26,54 @@ db.exec(`
   CREATE TABLE IF NOT EXISTS ofertas_enviadas (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     url_limpa TEXT UNIQUE NOT NULL,
+    contabiliza INTEGER NOT NULL DEFAULT 1,
     data_envio TIMESTAMP DEFAULT CURRENT_TIMESTAMP
   );
 `);
 
+// Migração idempotente: `contabiliza` separa DEDUPLICAÇÃO (0) de ENVIO (1).
+// Antes, cada oferta gravava 2 linhas (URL limpa + chave do produto) e as duas
+// contavam no limite diário — o MAX_ENVIOS_DIA valia pela metade.
+const colunasOfertas = db.prepare('PRAGMA table_info(ofertas_enviadas)').all();
+if (!colunasOfertas.some((coluna) => coluna.name === 'contabiliza')) {
+  db.transaction(() => {
+    db.exec('ALTER TABLE ofertas_enviadas ADD COLUMN contabiliza INTEGER NOT NULL DEFAULT 1');
+    // Histórico: mantém contável só a 1ª linha de cada segundo — a fila
+    // anti-ban nunca envia duas ofertas no mesmo segundo.
+    db.exec(
+      `UPDATE ofertas_enviadas SET contabiliza = 0
+       WHERE id NOT IN (SELECT MIN(id) FROM ofertas_enviadas GROUP BY data_envio)`
+    );
+  })();
+  console.log('🗃️  Migração: deduplicação x contagem diária separadas.');
+}
+
 const stmtBusca = db.prepare('SELECT 1 FROM ofertas_enviadas WHERE url_limpa = ? LIMIT 1');
-const stmtInsere = db.prepare('INSERT OR IGNORE INTO ofertas_enviadas (url_limpa) VALUES (?)');
+const stmtInsere = db.prepare('INSERT OR IGNORE INTO ofertas_enviadas (url_limpa, contabiliza) VALUES (?, ?)');
+// A virada do dia usa o FUSO DE OPERACAO (config), nao o fuso do servidor:
+// num VPS em UTC o limite diario zeraria as 21h de Brasilia.
 const stmtContaHoje = db.prepare(
-  "SELECT COUNT(*) AS total FROM ofertas_enviadas WHERE DATE(data_envio, 'localtime') = DATE('now', 'localtime')"
+  'SELECT COUNT(*) AS total FROM ofertas_enviadas WHERE contabiliza = 1 AND data_envio >= ?'
 );
 
 /**
- * @param {string} urlLimpa
- * @returns {boolean} true se a URL já foi enviada.
+ * A chave (URL limpa ou identidade do produto, ex.: "produto:meli:MLB123")
+ * já foi divulgada?
+ * @param {string} chave
+ * @returns {boolean} true se a chave já foi enviada.
  */
-export function jaFoiEnviada(urlLimpa) {
-  return !!stmtBusca.get(urlLimpa);
+export function jaFoiEnviada(chave) {
+  return !!stmtBusca.get(chave);
 }
 
 /**
- * Registra a URL limpa após envio bem-sucedido.
- * @param {string} urlLimpa
+ * Registra uma chave após envio bem-sucedido.
+ * @param {string} chave URL limpa ou identidade do produto
+ * @param {boolean} contabiliza true = conta no limite diário (apenas a chave
+ *   principal da oferta; as demais servem só para deduplicação).
  */
-export function registrarEnvio(urlLimpa) {
-  stmtInsere.run(urlLimpa);
+export function registrarEnvio(chave, contabiliza = true) {
+  stmtInsere.run(chave, contabiliza ? 1 : 0);
 }
 
 /**
@@ -62,7 +81,7 @@ export function registrarEnvio(urlLimpa) {
  * @returns {number}
  */
 export function contarEnviosHoje() {
-  return stmtContaHoje.get().total;
+  return stmtContaHoje.get(inicioDoDiaOperacional()).total;
 }
 
 /* ================= Fila persistente de envios ================= */

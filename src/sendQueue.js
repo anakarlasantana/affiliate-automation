@@ -14,7 +14,8 @@
  */
 import { setTimeout as delay } from 'node:timers/promises';
 import fs from 'node:fs';
-import config from './config.js';
+import path from 'node:path';
+import config, { DATA_DIR, horaOperacional } from './config.js';
 import {
   contarEnviosHoje,
   enfileirarDb,
@@ -22,7 +23,8 @@ import {
   removerDaFilaDb,
 } from './database.js';
 
-const STATUS_PATH = 'data/fila-status.json';
+/** Caminho absoluto (config): vale mesmo iniciando de outro diretorio. */
+const STATUS_PATH = path.join(DATA_DIR, 'fila-status.json');
 
 function dentroDaJanela(hora, janelas) {
   return janelas.some(({ inicio, fim }) => hora >= inicio && hora < fim);
@@ -30,7 +32,9 @@ function dentroDaJanela(hora, janelas) {
 
 /** Escolhe a faixa de delay (segundos) conforme o horario atual. */
 function faixaAtual() {
-  const hora = new Date().getHours();
+  // Hora no FUSO DE OPERACAO: num VPS em UTC o "pico" e a "madrugada"
+  // ficariam 3h deslocados.
+  const hora = horaOperacional();
   const { antiban } = config;
   if (dentroDaJanela(hora, antiban.horasSilencio)) return { delay: antiban.delayFrio, rotulo: 'madrugada 🌙' };
   if (dentroDaJanela(hora, antiban.horasQuentes)) return { delay: antiban.delayQuente, rotulo: 'pico 🔥' };
@@ -110,6 +114,7 @@ export class SendQueue {
         })),
         ...extra,
       };
+      fs.mkdirSync(DATA_DIR, { recursive: true });
       fs.writeFileSync(STATUS_PATH, JSON.stringify(status, null, 2));
     } catch {
       // status e apenas informativo; nunca derruba a fila

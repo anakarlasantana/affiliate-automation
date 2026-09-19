@@ -1,0 +1,42 @@
+[Unit]
+Description=Affiliate Automation — bot de ofertas (Telegram -> WhatsApp)
+# Garante rede antes do boot do WhatsApp (senao a 1a tentativa falha)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# ============ AJUSTE ESTES 3 CAMINHOS ============
+# Usuario dedicado (sem root): sudo useradd -m -s /bin/bash affiliate
+User=affiliate
+# Onde o projeto vive no servidor
+WorkingDirectory=/opt/affiliate-automation
+# Node instalado via apt ou nvm (nvm: use o caminho real de `which node`)
+ExecStart=/usr/bin/node src/app.js
+# =================================================
+
+# Recoloca o bot no ar apos crash/OOM/queda de rede — e o que mantem 24/7
+Restart=always
+RestartSec=30
+
+# Fuso do anti-ban (o servidor fica em UTC: sem isso o pico e a madrugada
+# ficam 3h deslocados). O .env tambem aceita TZ_OPERACAO
+Environment=TZ=America/Sao_Paulo
+Environment=NODE_ENV=production
+
+# Mata o Node E o Chrome filho no stop/restart: sem isso sobra um Chrome
+# orfao e um SingletonLock que impedem o proximo boot (falha clasica)
+KillMode=control-group
+TimeoutStopSec=30
+
+# Logs no journal (QR Code e diagnostico ficam visiveis em journalctl)
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=affiliate-automation
+
+# Endurecimento basico (mantendo acesso a rede e ao diretorio do projeto)
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

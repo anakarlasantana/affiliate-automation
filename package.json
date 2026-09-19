@@ -7,7 +7,9 @@
   "scripts": {
     "start": "node src/app.js",
     "check": "for f in src/*.js src/affiliates/*.js; do node --check $f; done",
-    "status": "node src/status.js"
+    "status": "node src/status.js",
+    "doctor": "node src/app.js --doctor",
+    "reset-sessao": "rm -rf tokens"
   },
   "dependencies": {
     "@wppconnect-team/wppconnect": "^2.3.3",

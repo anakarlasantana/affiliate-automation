@@ -18,6 +18,24 @@ const ENDPOINT = 'https://open-api.affiliate.shopee.com.br/graphql';
 export class ShopeeProvider extends AffiliateProvider {
   static dominios = ['shopee.com.br', 'shope.ee', 's.shopee.com.br'];
   static nome = 'Shopee';
+  static credenciaisRequeridas = ['SHOPEE_APP_ID', 'SHOPEE_SECRET'];
+
+  /** Shopee: o produto é identificado por shopId.itemId (-i.123.456). */
+  static perfil = {
+    urlNaoProduto: [/\/m\//, /\/universal-link\//, /\/cart(\/|$)/],
+    mergulhador: null,
+    idProduto: (url) => {
+      const porSlug = url.pathname.match(/-i\.(\d+)\.(\d+)/);
+      if (porSlug) return `shopee:${porSlug[1]}.${porSlug[2]}`;
+      const porProduto = url.pathname.match(/\/product\/(\d+)\/(\d+)/);
+      return porProduto ? `shopee:${porProduto[1]}.${porProduto[2]}` : null;
+    },
+    /** parâmetros de compartilhamento da Shopee */
+    paramsRemover: [
+      /^smtt$/i, /^smid$/i, /^share_channel$/i, /^is_from_login$/i,
+      /^uls_trackid$/i, /^sp_atk$/i, /^af_siteid$/i,
+    ],
+  };
 
   /**
    * Gera short link oficial de afiliado via GraphQL.
@@ -32,7 +50,8 @@ export class ShopeeProvider extends AffiliateProvider {
       return null;
     }
 
-    const query = `mutation{generateShortLink(input:{originUrl:"${urlLimpa.replace(/"/g, '\\"')}",subIds:["hi-cleo"]}){shortLink}}`;
+    const subId = config.afiliados.shopee.subId;
+    const query = `mutation{generateShortLink(input:{originUrl:"${urlLimpa.replace(/"/g, '\\"')}",subIds:["${subId}"]}){shortLink}}`;
     const payload = JSON.stringify({ query });
     const timestamp = Math.floor(Date.now() / 1000).toString();
     const assinatura = crypto
