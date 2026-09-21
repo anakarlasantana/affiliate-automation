@@ -579,19 +579,54 @@ async function iniciarWhatsApp() {
       // Segurança extra: nunca processar body que seja base64 de mídia
       if (/^(data:|[A-Za-z0-9+/]{500,}={0,2}$)/.test(texto) && msg.caption) texto = msg.caption;
 
-      // Baixa a foto da mensagem (se houver) para republicar junto com o link
+      // Baixa a foto da mensagem (se houver) para republicar junto com o link.
+      // Ordem de tentativas: 1. body já é data-URL (wppconnect entrega o
+      // base64 pronto em msg.body) | 2. msg.mediaData.preview (thumb) |
+      // 3. downloadMedia(msgId) com retry.
       let imagemBase64 = null;
       const temFoto = ['image', 'sticker'].includes(msg.type) || (msg.isMedia && msg.type !== 'chat');
       if (temFoto) {
-        // msg.id pode vir ausente/objeto dependendo da versão do wppconnect
-        const msgId =
-          typeof msg.id === 'string' && msg.id ? msg.id : msg.id?._serialized || msg.messageId || null;
-        if (!msgId) {
-          console.warn('⚠️  Mensagem com foto mas sem ID utilizável para download. Chaves:', Object.keys(msg).join(','));
-        } else {
-          // Retry 3x: "callFunctionOn timed out" é transitório sob carga.
-          const dl = await baixarMidiaComRetry(client, msgId, `whatsapp:${chatId}`);
+        const corpo = String(msg.body || '');
+        if (/^data:image\//i.test(corpo)) {
+          const v = validarImagemBase64(corpo);
+          if (v.valido) {
+            imagemBase64 = corpo;
+            console.log(`   🖼️  Foto via msg.body (direto, ${v.kb} KB, ${v.mime})`);
+          }
+        }
+        if (!imagemBase64 && msg.mediaData?.preview) {
+          try {
+            const prev = String(msg.mediaData.preview);
+            const cand = /^data:/i.test(prev) ? prev : `data:${msg.mimetype || 'image/jpeg'};base64,${prev}`;
+            const v = validarImagemBase64(cand);
+            if (v.valido) {
+              imagemBase64 = cand;
+              console.log(`   🖼️  Foto via mediaData.preview (${v.kb} KB, ${v.mime})`);
+            }
+          } catch { /* segue para downloadMedia */ }
+        }
+        if (!imagemBase64) {
+          // msg.id pode vir ausente/objeto dependendo da versão do wppconnect.
+          // Em backlog (SYNCING) o objeto vem sem id/downloadável: tenta id,
+          // quotedMsgId e, em último caso, o próprio objeto msg.
+          const candidatos = [
+            typeof msg.id === 'string' && msg.id ? msg.id : null,
+            msg.id?._serialized || null,
+            msg.messageId || null,
+            msg.quotedMsgId || null,
+            msg.id || null,
+            msg,
+          ].filter(Boolean);
+          let dl = { base64: null };
+          for (const cid of candidatos) {
+            const rotulo = typeof cid === 'string' ? cid.slice(-20) : 'msg-obj';
+            dl = await baixarMidiaComRetry(client, cid, `whatsapp:${chatId}:${rotulo}`);
+            if (dl.base64) break;
+          }
           imagemBase64 = dl.base64;
+          if (!imagemBase64) {
+            console.warn('   ⚠️  Foto indisponível via body/preview/download — fallback do site será usado.');
+          }
         }
       }
 
