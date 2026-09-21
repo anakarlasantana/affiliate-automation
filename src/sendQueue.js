@@ -89,6 +89,8 @@ export class SendQueue {
         urlLimpa: row.url_limpa,
         chaveFinal: row.chave_final,
         imagemBase64: row.imagem_base64,
+        origemFoto: row.origem_foto || '',
+        meuLink: row.meu_link || row.url_limpa || '',
       });
     }
     if (pendentes.length) {

@@ -16,6 +16,7 @@ import { NewMessage } from 'telegram/events/index.js';
 import config, { TOKENS_DIR, DATA_DIR, horaOperacional, inicioDoDiaOperacional } from './config.js';
 import { contarEnviosHoje, jaFoiEnviada, listarFilaDb, registrarEnvio } from './database.js';
 import { expandirLink, sanitizarUrl, extrairLinks, desembrulharVerificacaoMeli, desembrulharAfiliadoRedirecionador, extrairImagemProduto } from './linkResolver.js';
+import { baixarMidiaComRetry, placeholderPara, validarImagemBase64, textoErro, legendaParaFoto } from './imagem.js';
 import { converterParaAfiliado, perfilDeUrl, ehPaginaNaoProduto, resolverMergulhador, paramsRemoverPara, chaveProduto, resumoLojas } from './affiliates/index.js';
 import { SendQueue } from './sendQueue.js';
 import fs from 'node:fs';
@@ -156,23 +157,46 @@ async function processarOferta(textoOriginal, origem, wppClient, imagemBase64 = 
     }
     console.log(`   ↳ [${loja}] Meu link: ${meuLink}`);
 
-    // Fallback de imagem: se a mensagem original nao trouxe foto baixavel,
-    // pega a foto oficial do produto na pagina da loja (og:image) — generico,
-    // funciona para qualquer e-commerce.
+    // Cascata de imagem (nenhuma oferta sai sem foto):
+    //  1. foto da mensagem original (ja vem em imagemBase64);
+    //  2. foto oficial do site (og:image da URL canonica do produto);
+    //  3. placeholder da loja (assets locais) — ultimo recurso, nunca descarta.
+    let origemFoto = imagemBase64 ? 'mensagem' : null;
+    if (imagemBase64) {
+      const v = validarImagemBase64(String(imagemBase64));
+      if (!v.valido) {
+        console.warn(`   ⚠️  Foto da mensagem invalida (${v.motivo}) — buscando no site...`);
+        imagemBase64 = null; origemFoto = null;
+      }
+    }
     if (!imagemBase64) {
       try {
-        // urlLimpa (escopo da função), não urlTentativa (escopo do loop):
+        // urlLimpa (escopo da funcao), nao urlTentativa (escopo do loop):
         // antes, mensagem SEM foto quebrava aqui com ReferenceError e a
         // oferta inteira era perdida.
-        imagemBase64 = await extrairImagemProduto(urlLimpa);
-        if (imagemBase64) {
-          console.log(`   🖼️  Foto do produto obtida da página da loja (${Math.round(imagemBase64.length / 1024)} KB)`);
+        const doSite = await extrairImagemProduto(urlLimpa);
+        if (doSite?.base64) {
+          const v = validarImagemBase64(doSite.base64);
+          if (v.valido) {
+            imagemBase64 = doSite.base64;
+            origemFoto = doSite.origem || 'site';
+            console.log(`   🖼️  Foto do produto obtida do site (${v.kb} KB, ${v.mime}, via ${origemFoto})`);
+          } else {
+            console.warn(`   ⚠️  Foto do site invalida (${v.motivo}) — usando placeholder.`);
+          }
         } else {
-          console.log('   🖼️  Sem foto (nem na mensagem, nem na página da loja) — enviando só texto.');
+          console.log('   🖼️  Site sem foto util — usando placeholder da loja.');
         }
       } catch (e) {
-        console.warn(`   ⚠️  Erro ao buscar foto do produto: ${e.message}`);
+        console.warn(`   ⚠️  Erro ao buscar foto do produto: ${textoErro(e)} — usando placeholder.`);
       }
+    }
+    if (!imagemBase64) {
+      // Nivel 3: garante que a oferta SEMPRE tenha foto (nunca descarta).
+      const ph = placeholderPara(loja);
+      imagemBase64 = ph.base64;
+      origemFoto = ph.origem;
+      console.log(`   🖼️  Placeholder [${loja}] aplicado — oferta mantida com foto generica.`);
     }
 
     // Deduplica pela IDENTIDADE DO PRODUTO (MLB/ASIN/shopId.itemId...): o mesmo
@@ -230,7 +254,8 @@ async function processarOferta(textoOriginal, origem, wppClient, imagemBase64 = 
       mensagemFinal += '\n\n📢 Compartilhe o nosso grupo de ofertas:\n' + config.whatsapp.meuGrupoLink;
     }
 
-    // Entra na fila anti-ban (envio sequencial, delay dinâmico por horário)
+    // Entra na fila anti-ban (envio sequencial, delay dinâmico por horário).
+    // origemFoto rastreia a cascata: mensagem | site:* | placeholder.
     const primeiraLinha = (mensagemFinal.split('\n').find((l) => l.trim()) || '').trim();
     filaEnvio.enqueue({
       mensagemFinal,
@@ -238,6 +263,8 @@ async function processarOferta(textoOriginal, origem, wppClient, imagemBase64 = 
       chaveFinal,
       wppClient,
       imagemBase64,
+      origemFoto,
+      meuLink,
       loja: loja,
       titulo: primeiraLinha.slice(0, 80),
     });
@@ -442,6 +469,9 @@ async function criarClienteWhatsApp(chave) {
     folderNameToken: TOKENS_DIR,
     puppeteerOptions: {
       userDataDir: PERFIL_CHROME,
+      // Timeout de protocolo maior: downloadMedia de fotos grandes estourava
+      // "Runtime.callFunctionOn timed out" sob carga do Chromium.
+      protocolTimeout: 120000,
       ...(chrome ? { executablePath: chrome.caminho } : {}),
     },
     catchQR: (_qr, _ascii, tentativa) => {
@@ -559,16 +589,9 @@ async function iniciarWhatsApp() {
         if (!msgId) {
           console.warn('⚠️  Mensagem com foto mas sem ID utilizável para download. Chaves:', Object.keys(msg).join(','));
         } else {
-          try {
-            imagemBase64 = await client.downloadMedia(msgId);
-            if (!imagemBase64) {
-              console.warn(`⚠️  Mídia detectada (type=${msg.type}) mas download retornou vazio.`);
-            } else {
-              console.log(`   🖼️  Foto baixada (${Math.round(String(imagemBase64).length / 1024)} KB)`);
-            }
-          } catch (e) {
-            console.warn(`⚠️  Não consegui baixar a imagem (type=${msg.type}, id=${msgId}): ${e.message}`);
-          }
+          // Retry 3x: "callFunctionOn timed out" é transitório sob carga.
+          const dl = await baixarMidiaComRetry(client, msgId, `whatsapp:${chatId}`);
+          imagemBase64 = dl.base64;
         }
       }
 
@@ -633,16 +656,25 @@ async function iniciarTelegram(wppClient) {
         (msg.media?.photo ? msg.media : null) || // MessageMediaWebPage com foto de capa
         null;
       if (midiaFoto) {
-        try {
-          const buffer = await client.downloadMedia(msg.media || msg, {});
-          if (buffer) {
-            imagemBase64 = `data:image/jpeg;base64,${Buffer.from(buffer).toString('base64')}`;
-            console.log(`   🖼️  Foto do Telegram baixada (${Math.round(buffer.length / 1024)} KB)`);
-          } else {
-            console.warn('⚠️  Mensagem do Telegram tinha foto, mas o download retornou vazio.');
+        for (let t = 1; t <= 3 && !imagemBase64; t++) {
+          try {
+            const buffer = await client.downloadMedia(msg.media || msg, {});
+            if (buffer) {
+              const cand = `data:image/jpeg;base64,${Buffer.from(buffer).toString('base64')}`;
+              const v = validarImagemBase64(cand);
+              if (v.valido) {
+                imagemBase64 = cand;
+                console.log(`   🖼️  Foto do Telegram baixada (tentativa ${t}/3, ${v.kb} KB)`);
+              } else {
+                console.warn(`   ⚠️  Foto do Telegram invalida (${v.motivo}) — tentando de novo...`);
+              }
+            } else {
+              console.warn(`   ⚠️  Telegram: download vazio (tentativa ${t}/3).`);
+            }
+          } catch (e) {
+            console.warn(`   ⚠️  Telegram: download falhou (tentativa ${t}/3): ${textoErro(e)}`);
           }
-        } catch (e) {
-          console.warn(`⚠️  Não consegui baixar a imagem do Telegram: ${e.message}`);
+          if (!imagemBase64 && t < 3) await new Promise((r) => setTimeout(r, 2000 * t));
         }
       }
 
@@ -851,34 +883,43 @@ async function main() {
     console.warn('⚠️  MEU_GRUPO_WHATSAPP não está definido no .env!');
   }
 
-  // Fila de envio: envia, registra no banco e loga
-  filaEnvio = new SendQueue(async ({ mensagemFinal, urlLimpa, chaveFinal, wppClient, imagemBase64 }) => {
-    if (imagemBase64) {
-      // Envia a foto do produto com a oferta na legenda.
-      // Fallback em cascata: base64 -> arquivo temporário -> só texto.
+  // Fila de envio: TODA oferta sai com foto (nunca texto puro).
+  // sendImageFromBase64 e o correto para data-URL (sendImage so aceita
+  // caminho/URL http — era a causa dos "falhou (undefined)").
+  filaEnvio = new SendQueue(async ({ mensagemFinal, urlLimpa, chaveFinal, wppClient, imagemBase64, origemFoto, meuLink, loja }) => {
+    // Garantia final: se algo chegou sem imagem (fila antiga), usa placeholder.
+    if (!imagemBase64 || !validarImagemBase64(String(imagemBase64)).valido) {
+      const ph = placeholderPara(loja);
+      imagemBase64 = ph.base64;
+      origemFoto = ph.origem;
+      console.log(`   🖼️  Placeholder [${loja || '?'}] aplicado no envio — oferta mantida com foto.`);
+    }
+    const legenda = legendaParaFoto(mensagemFinal, meuLink || urlLimpa);
+    if (legenda.length < String(mensagemFinal || '').length) {
+      console.log(`   ✂️  Legenda truncada para ${legenda.length} chars (limite de caption do WhatsApp).`);
+    }
+    // Envia a foto do produto com a oferta na legenda.
+    // Fallback: base64 direto -> arquivo temporario. Sem sendText puro.
+    try {
+      await wppClient.sendImageFromBase64(config.whatsapp.meuGrupo, String(imagemBase64), 'produto.jpg', legenda);
+      console.log(`   🖼️  Imagem enviada via base64 (origem: ${origemFoto || 'desconhecida'}).`);
+    } catch (erroBase64) {
+      console.warn(`   ⚠️  sendImageFromBase64 falhou (${textoErro(erroBase64)}) — tentando via arquivo...`);
+      const dataUrl = String(imagemBase64);
+      const virgula = dataUrl.indexOf(',');
+      const cabecalho = virgula >= 0 ? dataUrl.slice(0, virgula) : '';
+      const dados = virgula >= 0 ? dataUrl.slice(virgula + 1) : '';
+      if (!dados) throw new Error('imagem sem payload base64 apos a virgula');
+      const mime = /data:(.*?)(;base64)?$/i.exec(cabecalho)?.[1] || 'image/jpeg';
+      const ext = mime.includes('png') ? '.png' : mime.includes('webp') ? '.webp' : mime.includes('gif') ? '.gif' : '.jpg';
+      const tmp = path.join(os.tmpdir(), `oferta-${Date.now()}${ext}`);
+      fs.writeFileSync(tmp, Buffer.from(dados, 'base64'));
       try {
-        await wppClient.sendImage(config.whatsapp.meuGrupo, imagemBase64, 'produto.jpg', mensagemFinal);
-      } catch (erroBase64) {
-        console.warn(`⚠️  sendImage via base64 falhou (${erroBase64.message}) — tentando via arquivo...`);
-        try {
-          const dataUrl = String(imagemBase64);
-          const [cabecalho, dados] = dataUrl.split(',');
-          const mime = /data:(.*?)(;base64)?$/.exec(cabecalho)?.[1] || 'image/jpeg';
-          const ext = mime.includes('png') ? '.png' : mime.includes('webp') ? '.webp' : '.jpg';
-          const tmp = path.join(os.tmpdir(), `oferta-${Date.now()}${ext}`);
-          fs.writeFileSync(tmp, Buffer.from(dados, 'base64'));
-          try {
-            await wppClient.sendImage(config.whatsapp.meuGrupo, tmp, `produto${ext}`, mensagemFinal);
-          } finally {
-            fs.unlink(tmp, () => {});
-          }
-        } catch (erroArquivo) {
-          console.warn(`⚠️  sendImage via arquivo falhou (${erroArquivo.message}) — enviando só o texto.`);
-          await wppClient.sendText(config.whatsapp.meuGrupo, mensagemFinal);
-        }
+        await wppClient.sendImage(config.whatsapp.meuGrupo, tmp, `produto${ext}`, legenda);
+        console.log(`   🖼️  Imagem enviada via arquivo (origem: ${origemFoto || 'desconhecida'}).`);
+      } finally {
+        fs.unlink(tmp, () => {});
       }
-    } else {
-      await wppClient.sendText(config.whatsapp.meuGrupo, mensagemFinal);
     }
     // Só o registro principal conta para o limite diário; a chave do produto
     // entra apenas na deduplicação (antes a mesma oferta contava 2x e o

@@ -201,14 +201,12 @@ export function desembrulharAfiliadoRedirecionador(url) {
 }
 
 /**
- * Extrai a FOTO DO PRODUTO da página da loja, como fallback quando a
- * mensagem original não traz imagem baixável. Usa as meta tags padrão
- * da web (og:image / twitter:image) — por isso funciona de forma genérica
- * para Mercado Livre, Shopee, Amazon, Magalu e praticamente qualquer
- * e-commerce.
+ * Extrai a FOTO DO PRODUTO da página da loja (nível 2 da cascata de imagem).
+ * Usa og:image / twitter:image / og:image:secure_url / JSON-LD / <img>.
+ * Retorna { base64, origem } — origem indica qual extrator achou.
  *
- * @param {string} urlProduto URL da página do produto (sem params de tracking)
- * @returns {Promise<string|null>} imagem em data URL (base64) ou null
+ * @param {string} urlProduto URL canônica do produto
+ * @returns {Promise<{ base64: string, origem: string }|null>}
  */
 export async function extrairImagemProduto(urlProduto) {
   try {
@@ -234,16 +232,33 @@ export async function extrairImagemProduto(urlProduto) {
     }
     if (!html) return null;
 
-    // meta tags de preview: og:image / twitter:image (com property antes ou
-    // depois do content, aspas simples ou duplas)
+    // meta tags de preview: og:image / twitter:image / og:image:secure_url
+    // (com property antes ou depois do content, aspas simples ou duplas)
     const padroes = [
+      /<meta[^>]+(?:property|name)=["'](?:og:image:secure_url)["'][^>]+content=["']([^"']+)["']/i,
       /<meta[^>]+(?:property|name)=["'](?:og:image|twitter:image)["'][^>]+content=["']([^"']+)["']/i,
-      /<meta[^>]+content=["']([^"']+)["'][^>]+(?:property|name)=["'](?:og:image|twitter:image)["']/i,
+      /<meta[^>]+content=["']([^"']+)["'][^>]+(?:property|name)=["'](?:og:image:secure_url|og:image|twitter:image)["']/i,
+      // JSON-LD: "image":"https://..." ou "image":["https://..."]
+      /"image"\s*:\s*"(https?:\/\/[^"]+\.(?:jpg|jpeg|png|webp)[^"]*)"/i,
+      /"image"\s*:\s*\[\s*"(https?:\/\/[^"]+?)"/i,
     ];
     let urlImagem = null;
+    let origem = 'site:og-image';
     for (const padrao of padroes) {
       const m = html.match(padrao);
-      if (m && m[1]) { urlImagem = m[1]; break; }
+      if (m && m[1]) {
+        urlImagem = m[1];
+        if (padrao.source.includes('"image"')) origem = 'site:json-ld';
+        break;
+      }
+    }
+    // Último recurso no HTML: primeira <img> com URL absoluta de produto
+    if (!urlImagem) {
+      const mImg = html.match(/<img[^>]+src=["'](https?:\/\/[^"']+\.(?:jpg|jpeg|png|webp)[^"']*)["']/i);
+      if (mImg && mImg[1] && !/pixel|tracker|blank|spacer|logo/i.test(mImg[1])) {
+        urlImagem = mImg[1];
+        origem = 'site:img-tag';
+      }
     }
     if (!urlImagem) return null;
 
@@ -258,10 +273,13 @@ export async function extrairImagemProduto(urlProduto) {
       headers: { 'User-Agent': USER_AGENT, Accept: 'image/*,*/*' },
       validateStatus: (s) => s >= 200 && s < 400,
     });
-    const contentType = String(img.headers['content-type'] || 'image/jpeg').split(';')[0];
-    if (!contentType.startsWith('image/')) return null;
+    const contentType = String(img.headers['content-type'] || 'image/jpeg').split(';')[0].trim();
+    if (!/^image\/(jpeg|jpg|png|webp|gif)/i.test(contentType)) return null;
+    // Rejeita imagem quebrada / pixel de tracking
+    const buf = Buffer.from(img.data);
+    if (buf.length < 5 * 1024) return null;
 
-    return `data:${contentType};base64,${Buffer.from(img.data).toString('base64')}`;
+    return { base64: `data:${contentType};base64,${buf.toString('base64')}`, origem };
   } catch (erro) {
     console.warn(`   ⚠️  Falha ao buscar foto do produto: ${erro.message}`);
     return null;

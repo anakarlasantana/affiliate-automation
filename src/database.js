@@ -18,6 +18,8 @@ db.exec(`
     url_limpa TEXT,
     chave_final TEXT,
     imagem_base64 TEXT,
+    origem_foto TEXT DEFAULT '',
+    meu_link TEXT DEFAULT '',
     criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
   );
 `);
@@ -46,6 +48,15 @@ if (!colunasOfertas.some((coluna) => coluna.name === 'contabiliza')) {
     );
   })();
   console.log('🗃️  Migração: deduplicação x contagem diária separadas.');
+}
+
+// Migração idempotente: origem da foto + meu link na fila (cascata de imagem).
+for (const [col, tipo] of [['origem_foto', 'TEXT DEFAULT \'\''], ['meu_link', 'TEXT DEFAULT \'\'']]) {
+  const cols = db.prepare('PRAGMA table_info(fila_envio)').all();
+  if (!cols.some((c) => c.name === col)) {
+    db.exec(`ALTER TABLE fila_envio ADD COLUMN ${col} ${tipo}`);
+    console.log(`🗃️  Migração: coluna fila_envio.${col} criada.`);
+  }
 }
 
 const stmtBusca = db.prepare('SELECT 1 FROM ofertas_enviadas WHERE url_limpa = ? LIMIT 1');
@@ -87,7 +98,7 @@ export function contarEnviosHoje() {
 /* ================= Fila persistente de envios ================= */
 
 const stmtFilaInsere = db.prepare(
-  'INSERT INTO fila_envio (loja, titulo, mensagem, url_limpa, chave_final, imagem_base64) VALUES (?, ?, ?, ?, ?, ?)'
+  'INSERT INTO fila_envio (loja, titulo, mensagem, url_limpa, chave_final, imagem_base64, origem_foto, meu_link) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
 );
 const stmtFilaLista = db.prepare('SELECT * FROM fila_envio ORDER BY id ASC');
 const stmtFilaRemove = db.prepare('DELETE FROM fila_envio WHERE id = ?');
@@ -96,10 +107,10 @@ const stmtFilaRemove = db.prepare('DELETE FROM fila_envio WHERE id = ?');
  * Persiste um item na fila (sobrevive a reinicio do app).
  * @returns {number} id da linha (usado para remover apos o envio).
  */
-export function enfileirarDb({ loja = '', titulo = '', mensagem = null, mensagemFinal = null, urlLimpa = '', chaveFinal = '', imagemBase64 = null }) {
+export function enfileirarDb({ loja = '', titulo = '', mensagem = null, mensagemFinal = null, urlLimpa = '', chaveFinal = '', imagemBase64 = null, origemFoto = '', meuLink = '' }) {
   const texto = mensagem || mensagemFinal;
   if (!texto) throw new Error('enfileirarDb: item sem texto de mensagem (mensagem/mensagemFinal vazios)');
-  return stmtFilaInsere.run(loja, titulo, texto, urlLimpa, chaveFinal, imagemBase64).lastInsertRowid;
+  return stmtFilaInsere.run(loja, titulo, texto, urlLimpa, chaveFinal, imagemBase64, origemFoto || '', meuLink || '').lastInsertRowid;
 }
 
 /** Lista os itens pendentes da fila, na ordem de chegada. */
