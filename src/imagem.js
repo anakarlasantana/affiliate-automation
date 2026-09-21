@@ -56,6 +56,10 @@ export function validarImagemBase64(dataUrl) {
  * transitorio sob carga do Chromium — 2a/3a tentativa costuma funcionar).
  */
 export async function baixarMidiaComRetry(client, msgId, rotulo = '') {
+  // Fail-fast: ID inválido nunca vai funcionar com retry (comum em backlog SYNCING).
+  if (msgId != null && typeof msgId === 'object' && !msgId.id && !msgId._serialized) {
+    return { base64: null, tentativas: 0 };
+  }
   const ESPERAS_MS = [2000, 5000];
   let ultimoErro = null;
   for (let tentativa = 1; tentativa <= 3; tentativa++) {
@@ -75,7 +79,13 @@ export async function baixarMidiaComRetry(client, msgId, rotulo = '') {
       }
     } catch (e) {
       ultimoErro = e;
-      console.warn(`   Download midia tentativa ${tentativa}/3 falhou: ${textoErro(e)}`);
+      const msg = textoErro(e);
+      // Erro de entrada inválida (sem id): retry é inútil — desiste na hora.
+      if (/undefined or null|messageId is undefined/i.test(msg)) {
+        console.warn(`   Download midia sem ID válido (${rotulo || 's/rotulo'}) — pulando para fallback do site.`);
+        return { base64: null, tentativas: tentativa };
+      }
+      console.warn(`   Download midia tentativa ${tentativa}/3 falhou: ${msg}`);
     }
     if (tentativa < 3) await new Promise((r) => setTimeout(r, ESPERAS_MS[tentativa - 1]));
   }
