@@ -16,7 +16,8 @@ import { NewMessage } from 'telegram/events/index.js';
 import config, { TOKENS_DIR, DATA_DIR, horaOperacional, inicioDoDiaOperacional } from './config.js';
 import { contarEnviosHoje, jaFoiEnviada, listarFilaDb, registrarEnvio } from './database.js';
 import { expandirLink, sanitizarUrl, extrairLinks, desembrulharVerificacaoMeli, desembrulharAfiliadoRedirecionador, extrairImagemProduto } from './linkResolver.js';
-import { baixarMidiaComRetry, placeholderPara, validarImagemBase64, textoErro, legendaParaFoto } from './imagem.js';
+import { baixarMidiaComRetry, reidratarMidia, placeholderPara, validarImagemBase64, textoErro, legendaParaFoto } from './imagem.js';
+import { colocarEmEspera, listarEspera, marcarTentativaEspera, removerDaEspera } from './database.js';
 import { converterParaAfiliado, perfilDeUrl, ehPaginaNaoProduto, resolverMergulhador, paramsRemoverPara, chaveProduto, resumoLojas } from './affiliates/index.js';
 import { SendQueue } from './sendQueue.js';
 import fs from 'node:fs';
@@ -54,7 +55,7 @@ const CANDIDATOS_CHROME = [
 
 /* ================= Pipeline de ofertas ================= */
 
-async function processarOferta(textoOriginal, origem, wppClient, imagemBase64 = null) {
+async function processarOferta(textoOriginal, origem, wppClient, imagemBase64 = null, msgIdMidia = null) {
   try {
     // Percorre TODOS os links da mensagem ate achar um link de produto
     // convertivel. Links de perfil grupal (meli.la -> /social/...), landing
@@ -157,46 +158,34 @@ async function processarOferta(textoOriginal, origem, wppClient, imagemBase64 = 
     }
     console.log(`   ↳ [${loja}] Meu link: ${meuLink}`);
 
-    // Cascata de imagem (nenhuma oferta sai sem foto):
-    //  1. foto da mensagem original (ja vem em imagemBase64);
-    //  2. foto oficial do site (og:image da URL canonica do produto);
-    //  3. placeholder da loja (assets locais) — ultimo recurso, nunca descarta.
+    // GATE DE IMAGEM: so entra na fila de envio com foto PRONTA.
+    //  1. Se SAIR do grupo de escuta (promobit): a foto do grupo NÃO é usada —
+    //     busca a foto do produto no site (cascata: site → placeholder).
+    //  2. Se for do grupo/alvo: usa foto do grupo quando disponível (cascata:
+    //     mensagem → site → placeholder).
+    //  3. Sem foto pronta → FILA DE ESPERA (worker re-hidrata a midia do
+    //     grupo por ate 60 min; depois tenta o site de novo e, em ultimo caso,
+    //     a logo da loja). Nada e enviado sem foto, nada e descartado.
+    const ehGrupoEscuta = origemProxy.includes('88262501239877') ||
+                           String(origem).includes(':88262501239877@') ||
+                           String(urlLimpa || '').includes('promobit');
     let origemFoto = imagemBase64 ? 'mensagem' : null;
     if (imagemBase64) {
       const v = validarImagemBase64(String(imagemBase64));
       if (!v.valido) {
         console.warn(`   ⚠️  Foto da mensagem invalida (${v.motivo}) — buscando no site...`);
         imagemBase64 = null; origemFoto = null;
+      } else if (ehGrupoEscuta) {
+        // grupo de escuta (promobit): descarta foto do grupo, busca no site
+        console.log(`   🙅 Foto do grupo de escuta ignorada (promobit) — buscando foto do produto no site...`);
+        imagemBase64 = null; origemFoto = null;
+      } else {
+        console.log(`   🖼️  Foto do grupo pronta (${v.kb} KB, ${v.mime}) — envio com foto real.`);
       }
     }
     if (!imagemBase64) {
-      try {
-        // urlLimpa (escopo da funcao), nao urlTentativa (escopo do loop):
-        // antes, mensagem SEM foto quebrava aqui com ReferenceError e a
-        // oferta inteira era perdida.
-        const doSite = await extrairImagemProduto(urlLimpa);
-        if (doSite?.base64) {
-          const v = validarImagemBase64(doSite.base64);
-          if (v.valido) {
-            imagemBase64 = doSite.base64;
-            origemFoto = doSite.origem || 'site';
-            console.log(`   🖼️  Foto do produto obtida do site (${v.kb} KB, ${v.mime}, via ${origemFoto})`);
-          } else {
-            console.warn(`   ⚠️  Foto do site invalida (${v.motivo}) — usando placeholder.`);
-          }
-        } else {
-          console.log('   🖼️  Site sem foto util — usando placeholder da loja.');
-        }
-      } catch (e) {
-        console.warn(`   ⚠️  Erro ao buscar foto do produto: ${textoErro(e)} — usando placeholder.`);
-      }
-    }
-    if (!imagemBase64) {
-      // Nivel 3: garante que a oferta SEMPRE tenha foto (nunca descarta).
-      const ph = placeholderPara(loja);
-      imagemBase64 = ph.base64;
-      origemFoto = ph.origem;
-      console.log(`   🖼️  Placeholder [${loja}] aplicado — oferta mantida com foto generica.`);
+      const doSite = await buscarFotoSite(urlLimpa);
+      if (doSite) { imagemBase64 = doSite.base64; origemFoto = doSite.origem; }
     }
 
     // Deduplica pela IDENTIDADE DO PRODUTO (MLB/ASIN/shopId.itemId...): o mesmo
@@ -254,9 +243,21 @@ async function processarOferta(textoOriginal, origem, wppClient, imagemBase64 = 
       mensagemFinal += '\n\n📢 Compartilhe o nosso grupo de ofertas:\n' + config.whatsapp.meuGrupoLink;
     }
 
-    // Entra na fila anti-ban (envio sequencial, delay dinâmico por horário).
-    // origemFoto rastreia a cascata: mensagem | site:* | placeholder.
     const primeiraLinha = (mensagemFinal.split('\n').find((l) => l.trim()) || '').trim();
+    // GATE: sem foto pronta → fila de espera (NÃO envia, NÃO descarta).
+    if (!imagemBase64) {
+      const chatId = String(origem).startsWith('whatsapp:') ? String(origem).slice(9) : '';
+      colocarEmEspera({
+        loja, titulo: primeiraLinha.slice(0, 80), mensagem: mensagemFinal,
+        urlLimpa, chaveFinal, meuLink, msgId: msgIdMidia || '', chatId, origem,
+        esperaMin: config.imagem.esperaMin,
+      });
+      console.log(`   ⏳ Sem foto pronta — aguardando midia do grupo (fila de espera, deadline ${config.imagem.esperaMin} min). Nada enviado, nada descartado.`);
+      return;
+    }
+
+    // Foto pronta → fila anti-ban (envio sequencial, delay dinâmico por horário).
+    // origemFoto rastreia a cascata: mensagem | site:* | placeholder.
     filaEnvio.enqueue({
       mensagemFinal,
       urlLimpa,
@@ -270,6 +271,30 @@ async function processarOferta(textoOriginal, origem, wppClient, imagemBase64 = 
     });
   } catch (erro) {
     console.error(`❌ Erro ao processar oferta [${origem}]: ${erro.message}`);
+  }
+}
+
+/**
+ * Busca a foto do produto no site (opcao 2 da cascata).
+ * @returns {Promise<{ base64: string, origem: string }|null>}
+ */
+async function buscarFotoSite(urlLimpa) {
+  try {
+    const doSite = await extrairImagemProduto(urlLimpa);
+    if (doSite?.base64) {
+      const v = validarImagemBase64(doSite.base64);
+      if (v.valido) {
+        console.log(`   🖼️  Foto do site pronta (${v.kb} KB, ${v.mime}, via ${doSite.origem || 'site'})`);
+        return { base64: doSite.base64, origem: doSite.origem || 'site' };
+      }
+      console.warn(`   ⚠️  Foto do site invalida (${v.motivo}) — vai para a fila de espera.`);
+      return null;
+    }
+    console.log('   🖼️  Site sem foto util — vai para a fila de espera.');
+    return null;
+  } catch (e) {
+    console.warn(`   ⚠️  Erro ao buscar foto do produto: ${textoErro(e)} — vai para a fila de espera.`);
+    return null;
   }
 }
 
@@ -584,7 +609,9 @@ async function iniciarWhatsApp() {
       // base64 pronto em msg.body) | 2. msg.mediaData.preview (thumb) |
       // 3. downloadMedia(msgId) com retry.
       let imagemBase64 = null;
+      let msgIdMidia = null;
       const temFoto = ['image', 'sticker'].includes(msg.type) || (msg.isMedia && msg.type !== 'chat');
+      console.log(`   📷 Tem foto? type=${msg.type || '?'} isMedia=${!!msg.isMedia} hasMedia=${!!(msg.body && /^data:image\//i.test(String(msg.body)) || msg.mediaData)}`);
       if (temFoto) {
         const corpo = String(msg.body || '');
         if (/^data:image\//i.test(corpo)) {
@@ -620,6 +647,7 @@ async function iniciarWhatsApp() {
           let dl = { base64: null };
           for (const cid of candidatos) {
             const rotulo = typeof cid === 'string' ? cid.slice(-20) : 'msg-obj';
+            if (!msgIdMidia && typeof cid === 'string') msgIdMidia = cid;
             dl = await baixarMidiaComRetry(client, cid, `whatsapp:${chatId}:${rotulo}`);
             if (dl.base64) break;
           }
@@ -630,7 +658,7 @@ async function iniciarWhatsApp() {
         }
       }
 
-      await processarOferta(texto, `whatsapp:${chatId}`, client, imagemBase64);
+      await processarOferta(texto, `whatsapp:${chatId}`, client, imagemBase64, msgIdMidia);
     } catch (erro) {
       console.error(`❌ Erro no listener do WhatsApp: ${erro.message}`);
     }
@@ -977,6 +1005,90 @@ async function main() {
 
   // Retoma envios que ficaram pendentes de execucoes anteriores
   filaEnvio.restaurarPendentes({ wppClient });
+
+  // Worker da fila de espera: gate de imagem — promove para a fila de envio
+  // SOMENTE com foto pronta (re-hidratada do grupo, do site ou logo da loja).
+  iniciarWorkerEsperaMidia(wppClient);
+}
+
+/**
+ * Worker da fila de espera de midia (roda a cada 2 min).
+ * Fluxo por item: 1. re-hidrata midia do grupo (getMessageById) |
+ * 2. deadline estourado? tenta o site | 3. ultimo caso: logo da loja.
+ * Promove para a fila de envio SEMPRE com foto — nunca descarta, nunca texto puro.
+ */
+function iniciarWorkerEsperaMidia(wppClient) {
+  const INTERVALO_MS = (config.imagem?.esperaIntervaloSeg || 120) * 1000;
+  async function varrer() {
+    let pendentes;
+    try {
+      pendentes = listarEspera();
+    } catch (e) {
+      console.warn(`   ⚠️  Worker espera: falha ao listar (${textoErro(e)})`);
+      return;
+    }
+    if (!pendentes.length) return;
+    const agora = new Date().toISOString().slice(0, 19).replace('T', ' ');
+    console.log(`   ⏳ Fila de espera: ${pendentes.length} oferta(s) aguardando midia...`);
+    for (const item of pendentes) {
+      try {
+        marcarTentativaEspera(item.id);
+        // 1) Foto do grupo (re-hidratacao) — prioridade, foto real do produto
+        if (item.msg_id) {
+          try {
+            const re = await reidratarMidia(wppClient, item.msg_id);
+            if (re.base64) {
+              promoverEspera(item, re.base64, re.origem || 'mensagem-reidratada', wppClient);
+              continue;
+            }
+          } catch (e) {
+            console.warn(`   ⏳ Espera #${item.id}: re-hidratacao falhou (${textoErro(e)})`);
+          }
+        }
+        // 2) Deadline estourado? tenta o site (opcao 2) e depois a logo (opcao 3)
+        if (String(item.deadline || '') <= agora) {
+          console.log(`   ⏰ Espera #${item.id} deadline atingido — buscando foto no site...`);
+          const doSite = await buscarFotoSite(item.url_limpa);
+          if (doSite) {
+            promoverEspera(item, doSite.base64, doSite.origem, wppClient);
+            continue;
+          }
+          const ph = placeholderPara(item.loja);
+          console.log(`   🖼️  Espera #${item.id}: logo [${item.loja}] aplicada apos deadline.`);
+          promoverEspera(item, ph.base64, ph.origem, wppClient);
+          continue;
+        }
+        console.log(`   ⏳ Espera #${item.id} [${item.loja}] ${item.titulo || ''} (tentativas: ${(item.tentativas || 0) + 1}, deadline: ${item.deadline})`);
+      } catch (e) {
+        console.warn(`   ⚠️  Worker espera #${item.id}: ${textoErro(e)}`);
+      }
+    }
+  }
+  setInterval(() => { varrer().catch((e) => console.warn(`   ⚠️  Worker espera: ${textoErro(e)}`)); }, INTERVALO_MS).unref?.();
+  // Primeira varredura apos 30s (da tempo do WhatsApp sincronizar o backlog)
+  setTimeout(() => { varrer().catch(() => {}); }, 30000).unref?.();
+}
+
+/** Move um item da espera para a fila de envio (sempre com foto valida). */
+function promoverEspera(item, imagemBase64, origemFoto, wppClient) {
+  const v = validarImagemBase64(String(imagemBase64));
+  if (!v.valido) {
+    console.warn(`   ⚠️  Espera #${item.id}: foto invalida (${v.motivo}) — mantida na espera.`);
+    return;
+  }
+  filaEnvio.enqueue({
+    mensagemFinal: item.mensagem,
+    urlLimpa: item.url_limpa,
+    chaveFinal: item.chave_final,
+    wppClient,
+    imagemBase64: String(imagemBase64),
+    origemFoto,
+    meuLink: item.meu_link,
+    loja: item.loja,
+    titulo: item.titulo,
+  });
+  removerDaEspera(item.id);
+  console.log(`   ✅ Espera #${item.id} promovida → fila de envio (foto: ${origemFoto}, ${v.kb} KB).`);
 }
 
 /** Encerramento limpo: fecha o cliente, mata o Chrome e limpa locks órfãos. */

@@ -21,6 +21,8 @@ const MIN_BYTES_IMAGEM = 5 * 1024;
 
 /** Cache dos placeholders carregados (evita ler disco a cada oferta). */
 const cachePlaceholder = new Map();
+/** mtime do arquivo no momento do cache — hot-reload: trocou o PNG, entra sem restart. */
+const cachePlaceholderMtime = new Map();
 
 /**
  * Extrai mensagem legivel de qualquer formato de erro do wppconnect
@@ -108,24 +110,40 @@ const PLACEHOLDERS = {
 
 export function placeholderPara(loja) {
   const chave = String(loja || 'default');
-  if (cachePlaceholder.has(chave)) return { base64: cachePlaceholder.get(chave), origem: 'placeholder' };
-  const slug = chave.replace(/[^a-zA-Z0-9]+/g, '-').toLowerCase() || 'default';
-  const arquivo = path.join(DATA_DIR, 'placeholders', `${slug}.png`);
-  try {
-    if (fs.existsSync(arquivo)) {
-      const dataUrl = `data:image/png;base64,${fs.readFileSync(arquivo).toString('base64')}`;
-      if (validarImagemBase64(dataUrl).valido) {
-        cachePlaceholder.set(chave, dataUrl);
-        return { base64: dataUrl, origem: 'placeholder' };
+  const slugLower = chave.replace(/[^a-zA-Z0-9]+/g, '-').toLowerCase() || 'default';
+  const slugOriginal = chave.replace(/[^a-zA-Z0-9]+/g, '-') || 'default';
+  const arquivoLower = path.join(DATA_DIR, 'placeholders', `${slugLower}.png`);
+  const arquivoOriginal = path.join(DATA_DIR, 'placeholders', `${slugOriginal}.png`);
+  // Hot-reload: arte propria no disco tem prioridade e entra sem restart.
+  // Tenta primeiro o slug minúsculo (normalizado), depois o nome original (maiúsculo).
+  const arquivosParaVerificar = [arquivoLower, arquivoOriginal];
+  for (const arquivo of arquivosParaVerificar) {
+    try {
+      if (fs.existsSync(arquivo)) {
+        const mtime = fs.statSync(arquivo).mtimeMs;
+        if (cachePlaceholder.has(chave) && cachePlaceholderMtime.get(chave) === mtime) {
+          return { base64: cachePlaceholder.get(chave), origem: 'placeholder' };
+        }
+        const dataUrl = `data:image/png;base64,${fs.readFileSync(arquivo).toString('base64')}`;
+        if (validarImagemBase64(dataUrl).valido) {
+          cachePlaceholder.set(chave, dataUrl);
+          cachePlaceholderMtime.set(chave, mtime);
+          return { base64: dataUrl, origem: 'placeholder' };
+        }
       }
-    }
+    } catch { /* segue para o próximo arquivo ou geração procedural */ }
+  }
+  // Se não achou nenhum arquivo em disco, gera o placeholder procedural
+  const arquivoSalvar = path.join(DATA_DIR, 'placeholders', `${slugLower}.png`);
+  try {
     const png = gerarPngSolido(PLACEHOLDERS[chave] || '#1F6FEB');
     try {
-      fs.mkdirSync(path.dirname(arquivo), { recursive: true });
-      fs.writeFileSync(arquivo, png);
+      fs.mkdirSync(path.dirname(arquivoSalvar), { recursive: true });
+      fs.writeFileSync(arquivoSalvar, png);
     } catch { /* cache em memoria basta */ }
     const dataUrl = `data:image/png;base64,${png.toString('base64')}`;
     cachePlaceholder.set(chave, dataUrl);
+    cachePlaceholderMtime.set(chave, fs.existsSync(arquivoSalvar) ? fs.statSync(arquivoSalvar).mtimeMs : 0);
     return { base64: dataUrl, origem: 'placeholder' };
   } catch (e) {
     console.warn(`   Falha ao gerar placeholder (${textoErro(e)}) — emergencia.`);
@@ -194,6 +212,45 @@ function gerarPngSolido(hex) {
     chunkPng('IDAT', idat),
     chunkPng('IEND', Buffer.alloc(0)),
   ]);
+}
+
+/**
+ * Re-hidrata uma mensagem do WhatsApp pelo ID: busca o objeto atualizado
+ * (que no backlog SYNCING chega sem mediaKey) e tenta o download.
+ * @returns {Promise<{ base64: string|null, origem: string|null }>}
+ */
+export async function reidratarMidia(client, msgId) {
+  if (!msgId) return { base64: null, origem: null };
+  // 1) Tenta recarregar o objeto da mensagem (2a leitura costuma vir completa)
+  let msgAtual = null;
+  for (const metodo of ['getMessageById']) {
+    try {
+      if (typeof client[metodo] === 'function') {
+        msgAtual = await client[metodo](msgId);
+        if (msgAtual) break;
+      }
+    } catch { /* tenta proximo */ }
+  }
+  // 2) Se o objeto tem midia agora, tenta body/preview/download
+  if (msgAtual) {
+    const corpo = String(msgAtual.body || '');
+    if (/^data:image\//i.test(corpo)) {
+      const v = validarImagemBase64(corpo);
+      if (v.valido) return { base64: corpo, origem: 'mensagem-reidratada' };
+    }
+    if (msgAtual.mediaData?.preview) {
+      try {
+        const prev = String(msgAtual.mediaData.preview);
+        const cand = /^data:/i.test(prev) ? prev : `data:${msgAtual.mimetype || 'image/jpeg'};base64,${prev}`;
+        if (validarImagemBase64(cand).valido) return { base64: cand, origem: 'mensagem-reidratada' };
+      } catch { /* segue */ }
+    }
+  }
+  // 3) Download direto pelo ID (agora com o servidor sincronizado pode funcionar)
+  const idAlvo = msgAtual?.id?._serialized || msgAtual?.id || msgId;
+  const dl = await baixarMidiaComRetry(client, idAlvo, 'reidratacao');
+  if (dl.base64) return { base64: dl.base64, origem: 'mensagem-reidratada' };
+  return { base64: null, origem: null };
 }
 
 /**

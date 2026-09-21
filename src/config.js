@@ -188,6 +188,12 @@ const config = {
     delayNormal: faixaSegundos(process.env.DELAY_NORMAL, 45, 120),
     delayFrio: faixaSegundos(process.env.DELAY_FRIO, 180, 420),
   },
+  imagem: {
+    /** Minutos que a oferta aguarda a midia do grupo antes do fallback site/logo */
+    esperaMin: Math.max(5, parseInt(process.env.ESPERA_MIDIA_MIN || '60', 10)),
+    /** Intervalo do worker de re-hidratacao (segundos) */
+    esperaIntervaloSeg: Math.max(30, parseInt(process.env.ESPERA_MIDIA_INTERVALO_SEG || '120', 10)),
+  },
   afiliados: {
     shopee: {
       appId: process.env.SHOPEE_APP_ID || '',
