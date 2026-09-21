@@ -13,6 +13,26 @@ import { DATA_DIR } from './config.js';
 /** Limite do WhatsApp para legenda de foto (~1024 chars). */
 export const LIMITE_LEGENDA_FOTO = 1000;
 
+/**
+ * Id do grupo que apenas MONITORA ofertas de terceiros (grupo de escuta).
+ * A foto que chega por ele e de outro anuncio, nunca do produto divulgado.
+ */
+export const ID_GRUPO_ESCUTA = '88262501239877';
+
+/**
+ * A oferta veio de um grupo de escuta? Nesse caso a foto do grupo e descartada
+ * e a cascata comeca pela foto do site (site → placeholder).
+ * Regra unica (antes era uma expressao inline no app.js, sem teste possivel).
+ * O chatId da fonte vem sempre dentro de `origem` (`whatsapp:<chatId>`, ex.:
+ * `whatsapp:88262501239877@c.us`) — nao existe um campo separado de origem.
+ * @param {{origem?: string, urlLimpa?: string}} dados
+ * @returns {boolean} true quando a foto do grupo NAO deve ser usada.
+ */
+export function ehGrupoDeEscuta({ origem = '', urlLimpa = '' } = {}) {
+  return String(origem || '').includes(`:${ID_GRUPO_ESCUTA}@`)
+    || String(urlLimpa || '').includes('promobit');
+}
+
 /** Mimes aceitos pelo wppconnect (sender.layer.js allowlist). */
 const MIME_ACEITO = /image\/(jpeg|jpg|png|webp|gif)/i;
 

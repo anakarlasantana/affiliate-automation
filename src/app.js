@@ -16,7 +16,7 @@ import { NewMessage } from 'telegram/events/index.js';
 import config, { TOKENS_DIR, DATA_DIR, horaOperacional, inicioDoDiaOperacional } from './config.js';
 import { contarEnviosHoje, jaFoiEnviada, listarFilaDb, registrarEnvio } from './database.js';
 import { expandirLink, sanitizarUrl, extrairLinks, desembrulharVerificacaoMeli, desembrulharAfiliadoRedirecionador, extrairImagemProduto } from './linkResolver.js';
-import { baixarMidiaComRetry, reidratarMidia, placeholderPara, validarImagemBase64, textoErro, legendaParaFoto } from './imagem.js';
+import { baixarMidiaComRetry, reidratarMidia, placeholderPara, validarImagemBase64, textoErro, legendaParaFoto, ehGrupoDeEscuta } from './imagem.js';
 import { colocarEmEspera, listarEspera, marcarTentativaEspera, removerDaEspera } from './database.js';
 import { converterParaAfiliado, perfilDeUrl, ehPaginaNaoProduto, resolverMergulhador, paramsRemoverPara, chaveProduto, resumoLojas } from './affiliates/index.js';
 import { SendQueue } from './sendQueue.js';
@@ -166,9 +166,10 @@ async function processarOferta(textoOriginal, origem, wppClient, imagemBase64 = 
     //  3. Sem foto pronta → FILA DE ESPERA (worker re-hidrata a midia do
     //     grupo por ate 60 min; depois tenta o site de novo e, em ultimo caso,
     //     a logo da loja). Nada e enviado sem foto, nada e descartado.
-    const ehGrupoEscuta = origemProxy.includes('88262501239877') ||
-                           String(origem).includes(':88262501239877@') ||
-                           String(urlLimpa || '').includes('promobit');
+    // Regra unica e testavel (imagem.js): id do grupo de escuta ou link promobit.
+    // A origem ja carrega o chatId (`whatsapp:<chatId>`, ex.: `whatsapp:88262501239877@c.us`),
+    // que e o unico dado de origem disponivel neste fluxo.
+    const ehGrupoEscuta = ehGrupoDeEscuta({ origem, urlLimpa });
     let origemFoto = imagemBase64 ? 'mensagem' : null;
     if (imagemBase64) {
       const v = validarImagemBase64(String(imagemBase64));
@@ -1033,8 +1034,12 @@ function iniciarWorkerEsperaMidia(wppClient) {
     for (const item of pendentes) {
       try {
         marcarTentativaEspera(item.id);
+        // Sem id de midia nao existe re-hidratacao possivel (backlog SYNCING
+        // chega sem id): esperar o deadline inteiro so atrasaria a oferta em
+        // ate 1h — nesse caso vai direto para a foto do site/logo.
+        const temIdMidia = Boolean(item.msg_id);
         // 1) Foto do grupo (re-hidratacao) — prioridade, foto real do produto
-        if (item.msg_id) {
+        if (temIdMidia) {
           try {
             const re = await reidratarMidia(wppClient, item.msg_id);
             if (re.base64) {
@@ -1046,8 +1051,8 @@ function iniciarWorkerEsperaMidia(wppClient) {
           }
         }
         // 2) Deadline estourado? tenta o site (opcao 2) e depois a logo (opcao 3)
-        if (String(item.deadline || '') <= agora) {
-          console.log(`   ⏰ Espera #${item.id} deadline atingido — buscando foto no site...`);
+        if (!temIdMidia || String(item.deadline || '') <= agora) {
+          console.log(`   ⏰ Espera #${item.id} ${temIdMidia ? 'deadline atingido' : 'sem id de midia'} — buscando foto no site...`);
           const doSite = await buscarFotoSite(item.url_limpa);
           if (doSite) {
             promoverEspera(item, doSite.base64, doSite.origem, wppClient);

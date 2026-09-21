@@ -17,8 +17,14 @@ import { fileURLToPath } from 'node:url';
  */
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 export const ROOT_DIR = path.resolve(__dirname, '..');
-export const DATA_DIR = path.join(ROOT_DIR, 'data');
-export const TOKENS_DIR = path.join(ROOT_DIR, 'tokens');
+/**
+ * DATA_DIR/TOKENS_DIR aceitam override pelo ambiente (teste/CI). Sem isso, um
+ * teste que gera PNG de placeholder escreve DENTRO de data/ do projeto — o
+ * teste deixa de ser isolado e passa a ler dado de producao. Em producao as
+ * variaveis nao existem e tudo continua derivado do ROOT_DIR.
+ */
+export const DATA_DIR = process.env.DATA_DIR || path.join(ROOT_DIR, 'data');
+export const TOKENS_DIR = process.env.TOKENS_DIR || path.join(ROOT_DIR, 'tokens');
 for (const dir of [DATA_DIR, TOKENS_DIR]) {
   try {
     fs.mkdirSync(dir, { recursive: true });
@@ -187,6 +193,12 @@ const config = {
     delayQuente: faixaSegundos(process.env.DELAY_QUENTE, 5, 15),
     delayNormal: faixaSegundos(process.env.DELAY_NORMAL, 45, 120),
     delayFrio: faixaSegundos(process.env.DELAY_FRIO, 180, 420),
+    /**
+     * Tentativas por oferta antes de descarta-la da fila. O envio e sequencial:
+     * sem esse teto, uma oferta com erro permanente (midia corrompida, sem
+     * permissao no grupo) ficaria em loop para sempre e travaria a fila inteira.
+     */
+    maxTentativasItem: Math.max(1, parseInt(process.env.MAX_TENTATIVAS_ITEM || '3', 10)),
   },
   imagem: {
     /** Minutos que a oferta aguarda a midia do grupo antes do fallback site/logo */
