@@ -172,6 +172,14 @@ const config = {
     deviceSyncMs: Math.max(0, parseInt(process.env.WPP_DEVICE_SYNC_TIMEOUT || '900', 10)) * 1000,
     /** Tentativas de conexao antes de desistir */
     tentativas: Math.max(1, parseInt(process.env.WPP_TENTATIVAS || '3', 10)),
+    /**
+     * Modo diagnostico de midia (DIAG_MIDIA=1): o app conecta, escuta e
+     * enfileira normalmente, mas NUNCA envia — e imprime o payload cru de cada
+     * mensagem com foto (`body` / `mediaData.preview` / `downloadMedia` com
+     * dimensoes e KB) e o resultado da cascata, para dizer de onde veio a
+     * imagem. Inerte em producao (default: false).
+     */
+    diagMidia: /^(1|true|sim|on)$/i.test(process.env.DIAG_MIDIA || ''),
   },
   antiban: {
     /** Limite máximo de ofertas enviadas por dia (0 = sem limite) */

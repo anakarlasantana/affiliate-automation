@@ -130,6 +130,18 @@ export class SendQueue {
     while (this.fila.length > 0) {
       const item = this.fila[0];
 
+      // Modo diagnostico (DIAG_MIDIA=1): observa a cascata de midia sem
+      // publicar NADA. Os itens continuam salvos no banco e a fila nao e
+      // consumida — e so ligar o app normal depois para enviar.
+      if (config.whatsapp.diagMidia) {
+        console.warn(
+          `🧪 DIAG_MIDIA=1 (dry-run): ${this.fila.length} item(ns) na fila NAO serao enviados. ` +
+            `Desligue o DIAG_MIDIA para publicar.`,
+        );
+        this.gravarStatus({ pausada: 'DIAG_MIDIA=1 (dry-run — nada e enviado)' });
+        break;
+      }
+
       // Limite diario
       const limite = config.antiban.maxEnviosDia;
       if (limite > 0 && contarEnviosHoje() >= limite) {

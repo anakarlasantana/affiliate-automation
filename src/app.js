@@ -39,6 +39,9 @@ import {
   validarImagemBase64,
   textoErro,
   legendaParaFoto,
+  dimensoesImagem,
+  classificarMidia,
+  MIN_LADO_FOTO,
 } from "./imagem.js";
 import {
   converterParaAfiliado,
@@ -90,6 +93,7 @@ async function processarOferta(
   origem,
   wppClient,
   imagemBase64 = null,
+  origemFotoMidia = null,
 ) {
   try {
     // Percorre TODOS os links da mensagem ate achar um link de produto
@@ -228,7 +232,10 @@ async function processarOferta(
     //  1. foto da mensagem original (ja vem em imagemBase64);
     //  2. foto oficial do site (og:image da URL canonica do produto);
     //  3. placeholder da loja (assets locais) — ultimo recurso, nunca descarta.
-    let origemFoto = imagemBase64 ? "mensagem" : null;
+    // O rotulo de origemFotoMidia diz COMO a foto da mensagem foi obtida
+    // (mensagem:body | mensagem:download | mensagem:miniatura) — assim o
+    // `npm run status` mostra na hora se alguma oferta saiu degradada.
+    let origemFoto = imagemBase64 ? origemFotoMidia || "mensagem" : null;
     if (imagemBase64) {
       const v = validarImagemBase64(String(imagemBase64));
       if (!v.valido) {
@@ -686,6 +693,136 @@ function blocoComoResolver({ erro, pediuQR }) {
   console.log(linhas.join("\n") + "\n");
 }
 
+/* ============ Diagnóstico de mídia (DIAG_MIDIA=1) ============ */
+
+/** JSON.stringify que nunca lança (log não pode derrubar o app). */
+function descreverValor(valor) {
+  if (typeof valor === "string") return valor;
+  try {
+    return JSON.stringify(valor);
+  } catch {
+    return String(valor);
+  }
+}
+
+/**
+ * Espelha console.log/warn/error em logs/app.log.
+ *
+ * POR QUE: rodando via nohup/pm2/systemd o terminal morre junto com o processo
+ * e o histórico do que aconteceu com a mídia (body miniatura? download falhou?)
+ * se perdia — foi o que escondeu este bug por dias.
+ */
+function espelharLogsEmArquivo() {
+  const caminho = path.join(config.caminhos.root, "logs", "app.log");
+  try {
+    fs.mkdirSync(path.dirname(caminho), { recursive: true });
+    // appendFileSync (e nao createWriteStream): o app chama process.exit() em
+    // varios caminhos e o buffer de um stream assincrono se perdia — o arquivo
+    // de log simplesmente nao existia depois do exit.
+    fs.appendFileSync(caminho, "── nova execução ──\n");
+    for (const nivel of ["log", "warn", "error"]) {
+      const original = console[nivel].bind(console);
+      console[nivel] = (...args) => {
+        original(...args);
+        try {
+          fs.appendFileSync(
+            caminho,
+            `${new Date().toISOString()} [${nivel}] ${args.map(descreverValor).join(" ")}\n`,
+          );
+        } catch {
+          // log é acessório: nunca interrompe a execução
+        }
+      };
+    }
+    return caminho;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Descreve um candidato de mídia SEM despejar base64 no log: bytes, dimensões
+ * e formato. Aceita data-URL, base64 cru ou Buffer.
+ */
+function descreverMidia(rotulo, entrada) {
+  if (entrada == null || entrada === "") return `${rotulo}=ausente`;
+  if (!Buffer.isBuffer(entrada) && typeof entrada !== "string") {
+    return `${rotulo}=objeto(${typeof entrada}) — não é base64`;
+  }
+  const texto = Buffer.isBuffer(entrada) ? entrada.toString("base64") : entrada;
+  const bruto = texto.startsWith("data:") ? texto.slice(texto.indexOf(",") + 1) : texto;
+  const kb = Math.round((bruto.length * 3) / 4 / 1024);
+  const prefixo = texto.startsWith("data:")
+    ? texto.slice(0, texto.indexOf(","))
+    : "sem-prefixo";
+  const dim = dimensoesImagem(texto);
+  return dim
+    ? `${rotulo}=${dim.largura}x${dim.altura} ${dim.formato} ${kb}KB (${prefixo})`
+    : `${rotulo}=ILEGIVEL ${kb}KB (${prefixo})`;
+}
+
+/**
+ * DIAG_MIDIA=1 — imprime o payload cru de uma mensagem com foto e mede as duas
+ * vias possíveis (body e downloadMedia, direto e via re-hidratação) para provar
+ * de onde vem a imagem que vai ao grupo. Só lê; nunca envia nada.
+ */
+async function relatarMidiaCrua(msg, chatId, client) {
+  let midiaBody = null;
+  let midiaBaixada = null;
+  let midiaFresca = null;
+  const linhas = [
+    "",
+    "🧪 ────── DIAG_MIDIA: mensagem com foto ──────",
+    `   grupo        : ${chatId} (${msg.chat?.name || "?"})`,
+    `   type/isMedia : ${msg.type} | ${msg.isMedia} | mimetype=${msg.mimetype || "-"}`,
+    `   body         : ${typeof msg.body} (${typeof msg.body === "string" ? msg.body.length : 0} chars)`,
+    `   ${descreverMidia("body", msg.body)}`,
+    `   ${descreverMidia("preview", msg.mediaData?.preview)}`,
+  ];
+
+  const corpo = String(msg.body || "");
+  if (corpo) {
+    const classe = classificarMidia(corpo);
+    // So guarda como midia se realmente for imagem (caption de texto nao conta).
+    if (dimensoesImagem(corpo)) midiaBody = corpo;
+    linhas.push(
+      `   body x limite: ${classe.motivo} — miniatura=${classe.miniatura} (limite ${MIN_LADO_FOTO}px)`,
+    );
+  }
+
+  const id = msg.id?._serialized || msg.messageId || msg.id;
+  linhas.push(
+    `   id           : ${typeof id === "string" && id ? id : "(AUSENTE — downloadMedia vai falhar)"}`,
+  );
+
+  if (typeof id === "string" && id && client) {
+    try {
+      midiaBaixada = await client.downloadMedia(id);
+      linhas.push(`   download(id) : ${descreverMidia("baixado", midiaBaixada)}`);
+    } catch (e) {
+      linhas.push(`   download(id) : ERRO ${textoErro(e)}`);
+    }
+    try {
+      const fresco = await client.getMessageById(id);
+      linhas.push(`   getMsgById   : ${fresco ? "ok" : "null"}`);
+      if (fresco) {
+        try {
+          midiaFresca = await client.downloadMedia(fresco);
+          linhas.push(`   download(fresco): ${descreverMidia("baixado", midiaFresca)}`);
+        } catch (e) {
+          linhas.push(`   download(fresco): ERRO ${textoErro(e)}`);
+        }
+      }
+    } catch (e) {
+      linhas.push(`   getMsgById   : ERRO ${textoErro(e)}`);
+    }
+  }
+
+  linhas.push("🧪 ───────────────────────────────────────────", "");
+  console.log(linhas.join("\n"));
+  return { id, body: midiaBody, baixado: midiaBaixada || midiaFresca };
+}
+
 async function iniciarWhatsApp() {
   const { client } = await conectarWhatsAppComRetry();
 
@@ -716,25 +853,55 @@ async function iniciarWhatsApp() {
       // fica em msg.caption. Por isso caption tem prioridade — senão ofertas
       // com foto eram ignoradas por "não ter link".
       let imagemBase64 = null;
+      /** Rastreia DE ONDE veio a foto da mensagem (vai para origem_foto no banco). */
+      let origemFotoMidia = null;
       const temFoto =
         ["image", "sticker"].includes(msg.type) ||
         (msg.isMedia && msg.type !== "chat");
       if (temFoto) {
         const corpo = String(msg.body || "");
 
-        // 1) msg.body: pode ser data-URL completa OU base64 cru (varia por
-        //    versão do wppconnect). Sem prefixo, assume o mimetype da msg.
-        if (/^data:image\//i.test(corpo)) {
-          imagemBase64 = corpo;
-          console.log("   🖼️  Foto via msg.body (data-URL).");
-        } else if (/^[A-Za-z0-9+/]{500,}={0,2}$/.test(corpo)) {
-          imagemBase64 = `data:${msg.mimetype || "image/jpeg"};base64,${corpo}`;
-          console.log("   🖼️  Foto via msg.body (base64 cru).");
+        // Modo diagnostico (DIAG_MIDIA=1): imprime o payload cru da mensagem
+        // (body/preview/downloadMedia, com dimensoes e KB) antes de decidir.
+        if (config.whatsapp.diagMidia) {
+          await relatarMidiaCrua(msg, chatId, client);
         }
 
-        // 2) downloadMedia é o caminho de MAIOR qualidade — tenta ANTES do
-        //    preview, que é thumb 32–100px. Com MIN_BYTES=1500 o preview
-        //    passaria na validação e publicaríamos miniatura no grupo.
+        // 1) msg.body: pode ser data-URL completa OU base64 cru (varia por
+        //    versão do wppconnect). Sem prefixo, assume o mimetype da msg.
+        //
+        //    ARMADILHA (bug corrigido aqui): em mensagem com foto o body
+        //    normalmente traz só o `jpegThumbnail` do WhatsApp — 72x72 e
+        //    1,5-2,5 KB. Aceitar o body sem medir publicava quadrado borrado e
+        //    nunca tentava o downloadMedia (que tem a foto em resolução cheia).
+        const candidatoBody = /^data:image\//i.test(corpo)
+          ? corpo
+          : /^[A-Za-z0-9+/]{500,}={0,2}$/.test(corpo)
+            ? `data:${msg.mimetype || "image/jpeg"};base64,${corpo}`
+            : null;
+
+        if (candidatoBody) {
+          const v = validarImagemBase64(candidatoBody);
+          const classe = classificarMidia(candidatoBody);
+          if (!v.valido) {
+            console.log(
+              `   ↷ msg.body descartado (${v.motivo}) — tentando downloadMedia.`,
+            );
+          } else if (classe.miniatura) {
+            console.log(
+              `   🔬 msg.body é MINIATURA (${classe.motivo} < ${MIN_LADO_FOTO}px, ${v.kb} KB) — ignorando e baixando a foto real.`,
+            );
+          } else {
+            imagemBase64 = candidatoBody;
+            origemFotoMidia = "mensagem:body";
+            console.log(
+              `   🖼️  Foto via msg.body (${classe.motivo}, ${v.kb} KB, ${classe.formato}).`,
+            );
+          }
+        }
+
+        // 2) downloadMedia é o caminho de MAIOR qualidade (foto em resolução
+        //    cheia). É aqui que a foto que o grupo recebe de verdade é obtida.
         if (!imagemBase64) {
           const candidatos = [
             typeof msg.id === "string" && msg.id ? msg.id : null,
@@ -742,7 +909,6 @@ async function iniciarWhatsApp() {
             msg.messageId || null,
             msg.quotedMsgId || null,
             msg.id || null,
-            msg,
           ].filter(Boolean);
           let dl = { base64: null };
           for (const cid of candidatos) {
@@ -754,23 +920,71 @@ async function iniciarWhatsApp() {
             );
             if (dl.base64) break;
           }
-          imagemBase64 = dl.base64;
+
+          // 2b) Re-hidratação: no backlog/SYNCING e em mensagem recém-chegada o
+          //     wppconnect responde "no media found for message id". Buscar a
+          //     mensagem de novo na store faz o download passar.
+          if (!dl.base64 && typeof client.getMessageById === "function") {
+            const idParaBusca = msg.id?._serialized || msg.messageId || msg.id;
+            if (idParaBusca) {
+              try {
+                const fresco = await client.getMessageById(idParaBusca);
+                if (fresco) {
+                  const base64 = await client.downloadMedia(fresco);
+                  const v = validarImagemBase64(String(base64 || ""));
+                  if (v.valido) {
+                    console.log(
+                      `   🔄 Foto recuperada por re-hidratação da mensagem (${v.kb} KB).`,
+                    );
+                    dl = { base64: String(base64), tentativas: 1 };
+                  }
+                }
+              } catch (e) {
+                console.warn(`   Re-hidratação falhou: ${textoErro(e)}`);
+              }
+            }
+          }
+
+          if (dl.base64) {
+            // Nunca publicar miniatura achando que é a foto (defesa em
+            // profundidade: vale tanto para o download quanto para o body).
+            const classe = classificarMidia(dl.base64);
+            if (classe.miniatura) {
+              console.warn(
+                `   🔬 downloadMedia devolveu MINIATURA (${classe.motivo}) — descartando e usando fallback.`,
+              );
+            } else {
+              imagemBase64 = dl.base64;
+              origemFotoMidia = "mensagem:download";
+              console.log(`   🖼️  Foto baixada da mensagem (${classe.motivo}).`);
+            }
+          }
         }
 
-        // 3) preview = ÚLTIMO recurso. Só chega aqui se body e download
-        //    falharam. Aceita porque é melhor thumb do que placeholder,
-        //    mas o log deixa explícito que é miniatura.
-        if (!imagemBase64 && msg.mediaData?.preview) {
+        // 3) mediaData.preview = ÚLTIMO recurso. ATENÇÃO: o wppconnect 2.3.3
+        //    declara MediaData SEM o campo `preview` (media-data/message.d.ts),
+        //    então na prática este ramo é código morto — o `String(objeto)`
+        //    antigo virava "[object Object]" e era rejeitado. Fica como rede de
+        //    segurança caso a lib volte a expor a thumb (só aceita string).
+        if (
+          !imagemBase64 &&
+          typeof msg.mediaData?.preview === "string" &&
+          msg.mediaData.preview
+        ) {
           try {
-            const prev = String(msg.mediaData.preview);
+            const prev = msg.mediaData.preview;
             const cand = /^data:/i.test(prev)
               ? prev
               : `data:${msg.mimetype || "image/jpeg"};base64,${prev}`;
             const v = validarImagemBase64(cand);
             if (v.valido) {
+              const classe = classificarMidia(cand);
               imagemBase64 = cand;
+              origemFotoMidia = classe.miniatura
+                ? "mensagem:miniatura"
+                : "mensagem:preview";
               console.log(
-                `   🖼️  Foto via mediaData.preview (thumb, ${v.kb} KB) — último recurso.`,
+                `   🖼️  Foto via mediaData.preview (${classe.motivo}, ${v.kb} KB) — último recurso.`,
               );
             }
           } catch {
@@ -780,12 +994,25 @@ async function iniciarWhatsApp() {
 
         if (!imagemBase64) {
           console.warn(
-            "   ⚠️  Foto indisponível via body/download/preview — fallback do site será usado.",
+            "   ⚠️  Foto da mensagem indisponível (body miniatura/inválido e download falhou) — fallback do site será usado." +
+              ` [type=${msg.type}, isMedia=${msg.isMedia}, mimetype=${msg.mimetype}]`,
           );
         }
+      } else if (typeof msg.mimetype === "string" && /^image\//i.test(msg.mimetype)) {
+        // imagem que não passou em temFoto: sem este aviso o caso cairia no
+        // og:image do site em silêncio (foi assim que o sintoma ficou invisível).
+        console.log(
+          `   🔎 Mimetype de imagem (${msg.mimetype}) mas temFoto=false — usando fallback do site.`,
+        );
       }
 
-      await processarOferta(texto, `whatsapp:${chatId}`, client, imagemBase64);
+      await processarOferta(
+        texto,
+        `whatsapp:${chatId}`,
+        client,
+        imagemBase64,
+        origemFotoMidia,
+      );
     } catch (erro) {
       console.error(`❌ Erro no listener do WhatsApp: ${erro.message}`);
     }
@@ -1162,8 +1389,20 @@ function nomeArquivoDeMime(dataUrl) {
 }
 
 async function main() {
+  // Espelha tudo em logs/app.log ANTES de qualquer log de boot (nohup/pm2
+  // perdem o terminal e com ele o histórico do diagnóstico).
+  const arquivoLog = espelharLogsEmArquivo();
   console.log("🚀 Iniciando Affiliate Automation...\n");
+  if (arquivoLog) console.log(`🗒️  Logs em ${arquivoLog}`);
   painelLojas();
+  if (config.whatsapp.diagMidia) {
+    console.warn(
+      "🧪 DIAG_MIDIA=1 LIGADO — modo diagnóstico de mídia:\n" +
+        "   • o app conecta, escuta e imprime o payload cru de cada foto;\n" +
+        "   • a fila NÃO envia nada (nada é publicado no grupo);\n" +
+        "   • desligue (DIAG_MIDIA= remover do .env) para voltar a publicar.\n",
+    );
+  }
   if (!config.whatsapp.meuGrupo) {
     console.warn("⚠️  MEU_GRUPO_WHATSAPP não está definido no .env!");
   }
@@ -1295,7 +1534,152 @@ process.on("unhandledRejection", (erro) => {
   );
 });
 
-if (process.argv.includes("--doctor")) {
+/* ================= Probe de mídia: npm run diag:midia ================= */
+
+/** Extensão de arquivo a partir do formato detectado (para salvar as amostras). */
+function extensaoDeFormato(formato) {
+  if (formato === 'png') return 'png';
+  if (formato === 'gif') return 'gif';
+  if (formato === 'webp') return 'webp';
+  if (formato === 'jpeg') return 'jpg';
+  return 'bin';
+}
+
+/** Outro `src/app.js` já rodando? O perfil do Chrome é exclusivo (um por vez). */
+function outraInstanciaRodando() {
+  try {
+    const saida = execFileSync('ps', ['-eo', 'pid=,args='], { encoding: 'utf8', timeout: 10000 });
+    return saida
+      .split('\n')
+      .filter((linha) => linha.includes('src/app.js') && !linha.includes('--diag-midia'))
+      .map((linha) => linha.trim().split(/\s+/)[0])
+      .filter((pid) => Number(pid) && Number(pid) !== process.pid);
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * `npm run diag:midia` — abre o WhatsApp APENAS PARA MEDIR as fotos recebidas.
+ *
+ * Percorre as últimas mensagens dos grupos monitorados, imprime o payload cru
+ * de cada foto (body x downloadMedia, com dimensões) e salva os bytes em
+ * data/diagnostico/ para inspeção visual. NUNCA envia nada.
+ *
+ * É o caminho para medir fotos ANTIGAS (a instrumentação DIAG_MIDIA=1 do
+ * `npm start` só vê as mensagens que chegam enquanto o app está rodando).
+ */
+async function executarDiagnosticoMidia() {
+  const arquivoLog = espelharLogsEmArquivo();
+  const argLimite = process.argv.find((a) => a.startsWith('--limite='));
+  const limite = Math.max(
+    1,
+    parseInt(argLimite?.split('=')[1] || process.env.DIAG_MIDIA_LIMITE || '10', 10),
+  );
+
+  console.log('🔬 diag:midia — medindo as fotos já recebidas (nada é enviado)');
+  if (arquivoLog) console.log(`🗒️  Logs em ${arquivoLog}`);
+
+  const conflito = outraInstanciaRodando();
+  if (conflito.length) {
+    console.error(
+      `⛔ Há outra instância do app rodando (pid ${conflito.join(', ')}) e o perfil do\n` +
+        '   Chrome é exclusivo. Pare o app (Ctrl+C / pm2 stop) e rode de novo.',
+    );
+    return 1;
+  }
+
+  const grupos = config.whatsapp.gruposMonitorados;
+  if (!grupos.length) {
+    console.error(
+      '⛔ GRUPOS_WHATSAPP_MONITORADOS está vazio no .env — não sei qual histórico varrer.\n' +
+        '   Rode `npm start` e mande uma mensagem no grupo: o ID (@g.us) aparece no log.',
+    );
+    return 1;
+  }
+
+  const pastaSaida = path.join(config.caminhos.data, 'diagnostico');
+  fs.mkdirSync(pastaSaida, { recursive: true });
+
+  let client = null;
+  let miniaturas = 0;
+  let fotos = 0;
+  let semMidia = 0;
+  try {
+    client = await criarClienteWhatsApp({
+      autoCloseMs: process.stdin.isTTY ? config.whatsapp.timeoutQrMs : 60000,
+      pediuQR: false,
+    });
+    console.log(`✅ Conectado. Varrendo as últimas ${limite} mensagens de cada grupo...\n`);
+
+    for (const chatId of grupos) {
+      let mensagens = [];
+      try {
+        mensagens = await client.getMessages(chatId, { count: limite });
+      } catch (e) {
+        console.warn(`   ⚠️  Não consegui ler ${chatId}: ${textoErro(e)}`);
+        continue;
+      }
+      const comFoto = mensagens.filter(
+        (m) =>
+          ['image', 'sticker'].includes(m.type) ||
+          (m.isMedia && /^image\//i.test(String(m.mimetype || ''))),
+      );
+      console.log(
+        `📂 ${chatId}: ${mensagens.length} mensagem(ns), ${comFoto.length} com foto`,
+      );
+
+      for (const msg of comFoto) {
+        const r = await relatarMidiaCrua(msg, chatId, client);
+        const bytes = r.baixado || r.body;
+        if (!bytes) {
+          semMidia++;
+          continue;
+        }
+        const classe = classificarMidia(bytes);
+        if (classe.miniatura) miniaturas++;
+        else fotos++;
+        const destino = path.join(
+          pastaSaida,
+          `amostra-${Date.now()}-${chatId.slice(0, 6)}-${classe.motivo}.${extensaoDeFormato(classe.formato)}`,
+        );
+        fs.writeFileSync(destino, Buffer.from(bytes.slice(bytes.indexOf(',') + 1), 'base64'));
+        console.log(`   💾 ${destino}`);
+      }
+    }
+
+    console.log(
+      '\n🔬 RESUMO do histórico varrido:\n' +
+        `   fotos de verdade : ${fotos}\n` +
+        `   MINIATURAS       : ${miniaturas}${
+          miniaturas ? '  ← o downloadMedia na store TEM a foto; o bug é a cascata aceitar o body' : ''
+        }\n` +
+        `   sem mídia nenhuma: ${semMidia}\n` +
+        `   amostras salvas  : ${pastaSaida}/\n`,
+    );
+    return 0;
+  } catch (e) {
+    console.error(`💥 diag:midia falhou: ${textoErro(e)}`);
+    return 1;
+  } finally {
+    try {
+      await client?.close?.();
+    } catch {
+      // cliente já morto
+    }
+    limparRestosChrome();
+  }
+}
+
+if (process.argv.includes("--diag-midia")) {
+  // npm run diag:midia — mede as fotos do histórico sem enviar nada
+  executarDiagnosticoMidia()
+    .then((codigo) => process.exit(codigo))
+    .catch((erro) => {
+      console.error(`💥 diag:midia falhou: ${erro?.message || erro}`);
+      process.exit(1);
+    });
+} else if (process.argv.includes("--doctor")) {
   // npm run doctor — diagnóstico sem abrir o WhatsApp
   executarDoctor()
     .then((codigo) => process.exit(codigo))

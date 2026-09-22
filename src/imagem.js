@@ -16,11 +16,148 @@ export const LIMITE_LEGENDA_FOTO = 1000;
 /** Mimes aceitos pelo wppconnect (sender.layer.js allowlist). */
 const MIME_ACEITO = /image\/(jpeg|jpg|png|webp|gif)/i;
 
-/** Tamanho minimo para descartar pixel de tracking / imagem quebrada. */
+/**
+ * Piso de bytes APENAS para descartar pixel de tracking / imagem corrompida.
+ * NAO serve para separar miniatura de foto real: o `jpegThumbnail` que o
+ * WhatsApp coloca em `msg.body` tem 1,5-2,5 KB e um og:image legitimo pode ter
+ * 15 KB — qualquer piso que barre um barra o outro. Quem separa e a dimensao
+ * (MIN_LADO_FOTO / classificarMidia).
+ */
 const MIN_BYTES_IMAGEM = 1500;
+
+/**
+ * Lado minimo (px) para tratar a imagem como "foto de verdade".
+ *
+ * POR QUE (bug real): em mensagem com foto, `msg.body` do wppconnect carrega o
+ * `jpegThumbnail` (72x72, ~1,5-2,5 KB) — nao a foto. Como a cascata antiga
+ * aceitava `msg.body` sem validar dimensao, o downloadMedia (que traria a foto
+ * em resolucao cheia) nunca era tentado e o grupo recebia quadrado borrado.
+ */
+export const MIN_LADO_FOTO = 300;
 
 /** Cache dos placeholders carregados (evita ler disco a cada oferta). */
 const cachePlaceholder = new Map();
+
+/** Aceita data-URL, base64 cru ou Buffer. */
+function paraBuffer(entrada) {
+  if (Buffer.isBuffer(entrada)) return entrada;
+  if (typeof entrada !== 'string' || !entrada) return null;
+  const base64 = entrada.startsWith('data:') ? entrada.slice(entrada.indexOf(',') + 1) : entrada;
+  try {
+    return Buffer.from(base64, 'base64');
+  } catch {
+    return null;
+  }
+}
+
+/** Dimensoes de JPEG: varre os segmentos ate o SOF (C0-CF, exceto C4/C8/CC). */
+function dimensoesJpeg(buf) {
+  let off = 2;
+  while (off + 9 < buf.length) {
+    if (buf[off] !== 0xff) {
+      off++;
+      continue;
+    }
+    const marcador = buf[off + 1];
+    if (marcador === 0xff) {
+      off++;
+      continue;
+    }
+    // Marcadores sem payload (TEM=01 e RST/SOI/EOI=D0-D9).
+    if (marcador === 0x01 || (marcador >= 0xd0 && marcador <= 0xd9)) {
+      off += 2;
+      continue;
+    }
+    const tam = buf.readUInt16BE(off + 2);
+    if (marcador >= 0xc0 && marcador <= 0xcf && ![0xc4, 0xc8, 0xcc].includes(marcador)) {
+      return {
+        largura: buf.readUInt16BE(off + 7),
+        altura: buf.readUInt16BE(off + 5),
+        formato: 'jpeg',
+      };
+    }
+    if (tam < 2) return null;
+    off += 2 + tam;
+  }
+  return null;
+}
+
+/** Dimensoes de WebP (VP8 com perda, VP8L sem perda e VP8X estendido). */
+function dimensoesWebp(buf) {
+  const tipo = buf.subarray(12, 16).toString('latin1');
+  if (tipo === 'VP8 ' && buf.length >= 30) {
+    return {
+      largura: buf.readUInt16LE(26) & 0x3fff,
+      altura: buf.readUInt16LE(28) & 0x3fff,
+      formato: 'webp',
+    };
+  }
+  if (tipo === 'VP8L' && buf.length >= 25) {
+    const bits = buf.readUInt32LE(21);
+    return {
+      largura: (bits & 0x3fff) + 1,
+      altura: ((bits >> 14) & 0x3fff) + 1,
+      formato: 'webp',
+    };
+  }
+  if (tipo === 'VP8X' && buf.length >= 30) {
+    return {
+      largura: (buf[24] | (buf[25] << 8) | (buf[26] << 16)) + 1,
+      altura: (buf[27] | (buf[28] << 8) | (buf[29] << 16)) + 1,
+      formato: 'webp',
+    };
+  }
+  return null;
+}
+
+/**
+ * Dimensoes reais lidas do CABECALHO dos bytes (JPEG/PNG/GIF/WebP).
+ * Aceita data-URL, base64 cru ou Buffer. Retorna { largura, altura, formato }
+ * ou null quando o formato nao e reconhecido (nunca inventa dimensao).
+ */
+export function dimensoesImagem(entrada) {
+  const buf = paraBuffer(entrada);
+  if (!buf || buf.length < 16) return null;
+  try {
+    if (buf[0] === 0xff && buf[1] === 0xd8) return dimensoesJpeg(buf);
+    if (buf.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))) {
+      return { largura: buf.readUInt32BE(16), altura: buf.readUInt32BE(20), formato: 'png' };
+    }
+    if (buf.subarray(0, 3).toString('latin1') === 'GIF') {
+      return { largura: buf.readUInt16LE(6), altura: buf.readUInt16LE(8), formato: 'gif' };
+    }
+    if (
+      buf.subarray(0, 4).toString('latin1') === 'RIFF' &&
+      buf.subarray(8, 12).toString('latin1') === 'WEBP'
+    ) {
+      return dimensoesWebp(buf);
+    }
+  } catch {
+    return null;
+  }
+  return null;
+}
+
+/**
+ * Classifica a imagem contra MIN_LADO_FOTO — e isto que separa a miniatura do
+ * WhatsApp (72x72) da foto real, independente do tamanho em bytes.
+ * Formato ilegivel => miniatura:false (nunca descarta o que nao consegue medir;
+ * a decisao fica com o resto da cascata).
+ */
+export function classificarMidia(entrada) {
+  const dim = dimensoesImagem(entrada);
+  if (!dim || !dim.largura || !dim.altura) {
+    return { miniatura: false, largura: 0, altura: 0, formato: 'desconhecido', motivo: 'dimensao ilegivel' };
+  }
+  const maiorLado = Math.max(dim.largura, dim.altura);
+  return {
+    miniatura: maiorLado < MIN_LADO_FOTO,
+    largura: dim.largura,
+    altura: dim.altura,
+    formato: dim.formato,
+    motivo: `${dim.largura}x${dim.altura}`,
+  };
+}
 
 /**
  * Extrai mensagem legivel de qualquer formato de erro do wppconnect
@@ -55,27 +192,36 @@ export function validarImagemBase64(dataUrl) {
  * Baixa midia do WhatsApp com retry (o erro "callFunctionOn timed out" e
  * transitorio sob carga do Chromium — 2a/3a tentativa costuma funcionar).
  */
-export async function baixarMidiaComRetry(client, msgId, rotulo = '') {
+export async function baixarMidiaComRetry(
+  client,
+  msgId,
+  rotulo = '',
+  // Esperas progressivas: o "callFunctionOn timed out" acontece sob carga do
+  // Chromium e costuma passar depois que a sincronizacao inicial termina.
+  // Injetaveis para o teste nao esperar 22s.
+  { esperasMs = [2000, 5000, 15000] } = {}
+) {
   // Fail-fast: ID inválido nunca vai funcionar com retry (comum em backlog SYNCING).
   if (msgId != null && typeof msgId === 'object' && !msgId.id && !msgId._serialized) {
     return { base64: null, tentativas: 0 };
   }
-  const ESPERAS_MS = [2000, 5000];
+  const ESPERAS_MS = esperasMs;
+  const MAX_TENTATIVAS = ESPERAS_MS.length + 1;
   let ultimoErro = null;
-  for (let tentativa = 1; tentativa <= 3; tentativa++) {
+  for (let tentativa = 1; tentativa <= MAX_TENTATIVAS; tentativa++) {
     try {
       const base64 = await client.downloadMedia(msgId);
       if (base64) {
         const v = validarImagemBase64(String(base64));
         if (v.valido) {
-          console.log(`   Foto da mensagem obtida (tentativa ${tentativa}/3, ${v.kb} KB, ${v.mime})${rotulo ? ` [${rotulo}]` : ''}`);
+          console.log(`   Foto da mensagem obtida (tentativa ${tentativa}/${MAX_TENTATIVAS}, ${v.kb} KB, ${v.mime})${rotulo ? ` [${rotulo}]` : ''}`);
           return { base64: String(base64), tentativas: tentativa };
         }
         ultimoErro = new Error(`download invalido: ${v.motivo}`);
-        console.warn(`   Download midia tentativa ${tentativa}/3 invalido: ${v.motivo} — de novo...`);
+        console.warn(`   Download midia tentativa ${tentativa}/${MAX_TENTATIVAS} invalido: ${v.motivo} — de novo...`);
       } else {
         ultimoErro = new Error('download retornou vazio');
-        console.warn(`   Download midia tentativa ${tentativa}/3 vazio — de novo...`);
+        console.warn(`   Download midia tentativa ${tentativa}/${MAX_TENTATIVAS} vazio — de novo...`);
       }
     } catch (e) {
       ultimoErro = e;
@@ -85,12 +231,18 @@ export async function baixarMidiaComRetry(client, msgId, rotulo = '') {
         console.warn(`   Download midia sem ID válido (${rotulo || 's/rotulo'}) — pulando para fallback do site.`);
         return { base64: null, tentativas: tentativa };
       }
-      console.warn(`   Download midia tentativa ${tentativa}/3 falhou: ${msg}`);
+      // A midia nao esta na store (backlog/SYNCING): insistir aqui nao resolve,
+      // quem resolve e re-hidratar a mensagem (getMessageById) no chamador.
+      if (/no media found/i.test(msg)) {
+        console.warn(`   Midia ainda nao disponivel na store (${rotulo || 's/rotulo'}) — tentando re-hidratar.`);
+        return { base64: null, tentativas: tentativa, semMidia: true };
+      }
+      console.warn(`   Download midia tentativa ${tentativa}/${MAX_TENTATIVAS} falhou: ${msg}`);
     }
-    if (tentativa < 3) await new Promise((r) => setTimeout(r, ESPERAS_MS[tentativa - 1]));
+    if (tentativa < MAX_TENTATIVAS) await new Promise((r) => setTimeout(r, ESPERAS_MS[tentativa - 1]));
   }
-  console.warn(`   Foto da mensagem indisponivel apos 3 tentativas: ${textoErro(ultimoErro)} — fallback do site.`);
-  return { base64: null, tentativas: 3 };
+  console.warn(`   Foto da mensagem indisponivel apos ${MAX_TENTATIVAS} tentativas: ${textoErro(ultimoErro)} — fallback do site.`);
+  return { base64: null, tentativas: MAX_TENTATIVAS };
 }
 /**
  * Placeholder por loja (ultimo nivel da cascata — nunca descarta oferta).
