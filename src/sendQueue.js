@@ -53,10 +53,6 @@ export class SendQueue {
     this.enviador = enviador;
     this.fila = [];
     this.processando = false;
-    /** Evita agendar varias retomadas por limite diario em paralelo. */
-    this.retomadaAgendada = false;
-    /** Ultimo item descartado (fica no fila-status.json para nao passar em branco). */
-    this.ultimoDescarte = null;
   }
 
   /**
@@ -106,34 +102,12 @@ export class SendQueue {
     return this.fila.length;
   }
 
-  /**
-   * Re-agenda a avaliacao da fila pausada pelo limite diario.
-   * O `break` do processar() nao se reativa sozinho: sem isso a fila so voltaria
-   * quando uma NOVA oferta entrasse (enqueue) — ficando parada na virada do dia.
-   * @param {number} intervaloSeg intervalo da nova checagem (default 5 min)
-   */
-  agendarRetomada(intervaloSeg = 300) {
-    if (this.retomadaAgendada) return;
-    this.retomadaAgendada = true;
-    const timer = setTimeout(() => {
-      this.retomadaAgendada = false;
-      if (!this.fila.length) return;
-      console.log(`🔄 Reavaliando a fila pausada (${this.fila.length} pendente(s))...`);
-      void this.processar();
-    }, intervaloSeg * 1000);
-    timer.unref?.();
-    console.log(`⏱️  Limite diario: nova checagem da fila em ${Math.round(intervaloSeg / 60)} min.`);
-  }
-
   /** Atualiza data/fila-status.json para consulta externa (npm run status). */
   gravarStatus(extra = {}) {
     try {
       const status = {
         atualizadoEm: new Date().toLocaleString('pt-BR'),
         enviadasHoje: contarEnviosHoje(),
-        // Persistente: sobrevive aos envios seguintes (descartar oferta nunca
-        // pode passar em branco no `npm run status`).
-        ...(this.ultimoDescarte ? { ultimoDescarte: this.ultimoDescarte } : {}),
         pendentes: this.fila.map((item, i) => ({
           posicao: i + 1,
           loja: item.loja || '?',
@@ -161,7 +135,6 @@ export class SendQueue {
       if (limite > 0 && contarEnviosHoje() >= limite) {
         console.warn(`⛔ Limite diario de ${limite} envios atingido. Fila pausada (pendentes ficam salvos no banco).`);
         this.gravarStatus({ pausada: 'limite diario atingido' });
-        this.agendarRetomada();
         break;
       }
 
@@ -177,25 +150,7 @@ export class SendQueue {
         if (item.dbId) removerDaFilaDb(item.dbId);
         this.gravarStatus();
       } catch (erro) {
-        item.tentativas = (item.tentativas || 0) + 1;
-        const max = config.antiban.maxTentativasItem;
-        // O envio e sequencial: sem teto de tentativas, uma oferta com erro
-        // permanente travava a fila inteira para sempre.
-        if (item.tentativas >= max) {
-          console.error(`❌ Falha no envio (${item.tentativas}/${max}) — descartando para nao travar a fila: ${erro.message}`);
-          this.fila.shift();
-          if (item.dbId) removerDaFilaDb(item.dbId);
-          this.ultimoDescarte = {
-            loja: item.loja || '?',
-            titulo: item.titulo || '',
-            motivo: erro.message,
-            tentativas: item.tentativas,
-            quando: new Date().toLocaleString('pt-BR'),
-          };
-          this.gravarStatus();
-          continue;
-        }
-        console.error(`❌ Falha no envio (${item.tentativas}/${max}), movendo para o fim da fila: ${erro.message}`);
+        console.error(`❌ Falha no envio, movendo para o fim da fila: ${erro.message}`);
         this.fila.push(this.fila.shift());
         // Backoff para nao martelar em caso de erro recorrente
         await delay(aleatorioEntre(30, 90) * 1000);

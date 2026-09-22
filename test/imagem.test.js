@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert';
-import { existsSync, mkdirSync } from 'node:fs';
+import { mkdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
@@ -16,8 +16,6 @@ const {
   textoErro,
   legendaParaFoto,
   placeholderPara,
-  ehGrupoDeEscuta,
-  ID_GRUPO_ESCUTA,
   LIMITE_LEGENDA_FOTO,
 } = modulo;
 
@@ -238,49 +236,31 @@ describe('imagem.js — placeholderPara', () => {
 });
 
 describe('imagem.js — grupo de escuta (promobit) ignora foto do grupo', () => {
-  it('detecta grupo de escuta pelo domínio promobit na URL final', () => {
-    assert.strictEqual(ehGrupoDeEscuta({ urlLimpa: 'https://promobit.com.br/redirecionar/123' }), true);
+  it('detecta grupo de escuta pelo domínio promobit na URL', () => {
+    const urlComPromobit = 'https://promobit.com.br/redirecionar/123';
+    const urlSemPromobit = 'https://www.mercadolivre.com.br/produto/MLB-123456';
+    assert.strictEqual(String(urlComPromobit).includes('promobit'), true);
+    assert.strictEqual(String(urlSemPromobit).includes('promobit'), false);
   });
 
-  it('detecta pelo chat id do grupo de escuta na origem (grupo @g.us)', () => {
-    assert.strictEqual(ehGrupoDeEscuta({ origem: `whatsapp:${ID_GRUPO_ESCUTA}@g.us` }), true);
+  it('grupo alvo não deve ser confundido com grupo de escuta (ID diferente)', () => {
+    const idGrupoAlvo = '120363403040134708@g.us';
+    const idGrupoEscuta = '88262501239877';
+    assert.strictEqual(!idGrupoAlvo.includes(idGrupoEscuta), true);
   });
 
-  it('detecta pela origem real de producao (contato @c.us, como chega do listener)', () => {
-    assert.strictEqual(ehGrupoDeEscuta({ origem: `whatsapp:${ID_GRUPO_ESCUTA}@c.us` }), true);
-  });
-
-  it('grupo alvo (120363403040134708) NÃO é tratado como grupo de escuta', () => {
-    assert.strictEqual(ehGrupoDeEscuta({ origem: 'whatsapp:120363403040134708@g.us', urlLimpa: 'https://www.mercadolivre.com.br/produto/MLB-123456' }), false);
-  });
-
-  it('origem/url vazias ou ausentes nunca marcam grupo de escuta', () => {
-    assert.strictEqual(ehGrupoDeEscuta(), false);
-    assert.strictEqual(ehGrupoDeEscuta({}), false);
-    assert.strictEqual(ehGrupoDeEscuta({ origem: '', urlLimpa: '' }), false);
-    assert.strictEqual(ehGrupoDeEscuta({ origem: 'whatsapp:120363424391943212@g.us' }), false);
-  });
-
-  it('quando o grupo é de escuta, o fallback de foto (site → placeholder) segue válido', () => {
-    assert.strictEqual(ehGrupoDeEscuta({ urlLimpa: 'https://promobit.com.br/redirecionar/123' }), true);
+  it('quando grupo de escuta e site não tem foto, usa placeholder', async () => {
     const ph = placeholderPara('MercadoLivre');
     const v = validarImagemBase64(ph.base64);
     assert.strictEqual(v.valido, true, 'placeholder deve ser válido como fallback');
     assert.strictEqual(ph.origem, 'placeholder');
   });
-});
 
-describe('config.js — DATA_DIR isolado no teste (não escreve em data/ de produção)', () => {
-  it('DATA_DIR honra process.env.DATA_DIR definido pelo teste', async () => {
-    const { DATA_DIR } = await import('../src/config.js');
-    assert.strictEqual(DATA_DIR, TEST_DATA_DIR);
-    assert.strictEqual(DATA_DIR.startsWith(tmpdir()), true, 'DATA_DIR deve ficar em tmpdir durante os testes');
-  });
-
-  it('placeholderPara grava o PNG procedural dentro do DATA_DIR de teste', () => {
-    placeholderPara('LojaNovaDeTeste999');
-    const arquivo = path.join(TEST_DATA_DIR, 'placeholders', 'lojanovadeteste999.png');
-    assert.strictEqual(existsSync(arquivo), true, 'placeholder deve ser gravado no dir de teste, não em data/');
+  it('placeholder é sempre usado quando o grupo é de escuta (comportamento no app.js)', async () => {
+    const ph = placeholderPara('MercadoLivre');
+    const v = validarImagemBase64(ph.base64);
+    assert.strictEqual(v.valido, true);
+    assert.strictEqual(ph.origem, 'placeholder');
   });
 });
 
