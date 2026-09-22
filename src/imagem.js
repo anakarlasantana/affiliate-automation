@@ -17,7 +17,7 @@ export const LIMITE_LEGENDA_FOTO = 1000;
 const MIME_ACEITO = /image\/(jpeg|jpg|png|webp|gif)/i;
 
 /** Tamanho minimo para descartar pixel de tracking / imagem quebrada. */
-const MIN_BYTES_IMAGEM = 5 * 1024;
+const MIN_BYTES_IMAGEM = 1500;
 
 /** Cache dos placeholders carregados (evita ler disco a cada oferta). */
 const cachePlaceholder = new Map();
