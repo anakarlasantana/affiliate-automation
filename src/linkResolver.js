@@ -205,23 +205,16 @@ export function desembrulharAfiliadoRedirecionador(url) {
  * Usa og:image / twitter:image / og:image:secure_url / JSON-LD / <img>.
  * Retorna { base64, origem } — origem indica qual extrator achou.
  *
- * Estratégia anti-bot (Meli 403 no UA desktop): rotaciona User-Agents de
- * crawlers de link-preview (WhatsApp/Facebook/Telegram/mobile), que recebem
- * as meta tags de preview em ~100% dos casos.
- *
  * @param {string} urlProduto URL canônica do produto
  * @returns {Promise<{ base64: string, origem: string }|null>}
  */
 export async function extrairImagemProduto(urlProduto) {
   try {
-    if (!urlProduto || !/^https?:\/\//i.test(urlProduto)) return null;
-    // Cadeia de UA: 1. WhatsApp (mesmo cliente que vai exibir o preview)
-    // 2. facebookexternalhit  3. TelegramBot  4. Android mobile  5. desktop
+    // Algumas lojas (ex.: Mercado Livre) só servem as meta tags de preview
+    // para crawlers de link-preview (Facebook/WhatsApp). Tentamos os dois UAs.
     const UAS = [
-      'WhatsApp/2.24.12.16 A',
+      'WhatsApp/2',
       'facebookexternalhit/1.1 (+http://www.facebook.com/externalhit_uatext.php)',
-      'TelegramBot (like TwitterBot)',
-      'Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Mobile Safari/537.36',
       USER_AGENT,
     ];
     let html = '';
@@ -234,54 +227,37 @@ export async function extrairImagemProduto(urlProduto) {
           validateStatus: (s) => s >= 200 && s < 400,
         });
         html = typeof resposta.data === 'string' ? resposta.data : '';
-        if (html && /og:image|twitter:image/i.test(html)) {
-          if (ua !== UAS[UAS.length - 1]) console.log(`   🌐 HTML obtido com UA "${ua.slice(0, 24)}..."`);
-          break;
-        }
+        if (html && /og:image|twitter:image/i.test(html)) break;
       } catch { /* tenta o próximo UA */ }
     }
     if (!html) return null;
 
-    // meta tags de preview: og:image / og:image:secure_url / twitter:image
-    // (com property antes ou depois do content, aspas simples ou duplas).
-    // O decodeURIComponent cobre Meli/Shopee que escapam a URL (%2F, \u002F).
-    const decode = (s) => {
-      try { return decodeURIComponent(s); } catch { return s; }
-    };
+    // meta tags de preview: og:image / twitter:image / og:image:secure_url
+    // (com property antes ou depois do content, aspas simples ou duplas)
     const padroes = [
-      /<meta[^>]+(?:property|name)=["'](?:og:image:secure_url|og:image:url)["'][^>]+content=["']([^"']+)["']/i,
-      /<meta[^>]+content=["']([^"']+)["'][^>]+(?:property|name)=["'](?:og:image:secure_url|og:image:url)["']/i,
-      /<meta[^>]+(?:property|name)=["'](?:og:image|twitter:image|twitter:image:src)["'][^>]+content=["']([^"']+)["']/i,
-      /<meta[^>]+content=["']([^"']+)["'][^>]+(?:property|name)=["'](?:og:image|twitter:image|twitter:image:src)["']/i,
-      // <link rel="image_src" href="..."> (fallback antigo, ainda usado)
-      /<link[^>]+rel=["']image_src["'][^>]+href=["']([^"']+)["']/i,
-      // JSON-LD: "image":"https://..." | "image":["https://..."] | objeto {url:...}
-      /"image"\s*:\s*"(https?:\/\/[^"]+?\.(?:jpg|jpeg|png|webp)[^"]*)"/i,
+      /<meta[^>]+(?:property|name)=["'](?:og:image:secure_url)["'][^>]+content=["']([^"']+)["']/i,
+      /<meta[^>]+(?:property|name)=["'](?:og:image|twitter:image)["'][^>]+content=["']([^"']+)["']/i,
+      /<meta[^>]+content=["']([^"']+)["'][^>]+(?:property|name)=["'](?:og:image:secure_url|og:image|twitter:image)["']/i,
+      // JSON-LD: "image":"https://..." ou "image":["https://..."]
+      /"image"\s*:\s*"(https?:\/\/[^"]+\.(?:jpg|jpeg|png|webp)[^"]*)"/i,
       /"image"\s*:\s*\[\s*"(https?:\/\/[^"]+?)"/i,
-      /"image"\s*:\s*\{[^}]*?"url"\s*:\s*"(https?:\/\/[^"]+?)"/i,
     ];
     let urlImagem = null;
     let origem = 'site:og-image';
     for (const padrao of padroes) {
       const m = html.match(padrao);
       if (m && m[1]) {
-        urlImagem = decode(m[1]).replace(/\\u002F/gi, '/');
-        if (padrao.source.includes('image_src')) origem = 'site:link-image_src';
-        else if (padrao.source.includes('"image"')) origem = 'site:json-ld';
-        else origem = padrao.source.includes('secure_url') || padrao.source.includes('og:image:url') ? 'site:og-image-secure' : 'site:og-image';
+        urlImagem = m[1];
+        if (padrao.source.includes('"image"')) origem = 'site:json-ld';
         break;
       }
     }
     // Último recurso no HTML: primeira <img> com URL absoluta de produto
     if (!urlImagem) {
-      const mImgs = html.match(/<img[^>]+src=["']([^"']+\.(?:jpg|jpeg|png|webp)[^"']*)["']/gi) || [];
-      for (const tagImg of mImgs) {
-        const m = tagImg.match(/src=["']([^"']+)["']/i);
-        if (m && m[1] && !/pixel|tracker|blank|spacer|logo|icon|sprite|avatar|bandeira|flag|pagamento/i.test(m[1]) && m[1].length > 30) {
-          urlImagem = m[1];
-          origem = 'site:img-tag';
-          break;
-        }
+      const mImg = html.match(/<img[^>]+src=["'](https?:\/\/[^"']+\.(?:jpg|jpeg|png|webp)[^"']*)["']/i);
+      if (mImg && mImg[1] && !/pixel|tracker|blank|spacer|logo/i.test(mImg[1])) {
+        urlImagem = mImg[1];
+        origem = 'site:img-tag';
       }
     }
     if (!urlImagem) return null;

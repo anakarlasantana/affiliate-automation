@@ -25,24 +25,6 @@ db.exec(`
 `);
 
 db.exec(`
-  CREATE TABLE IF NOT EXISTS fila_espera_midia (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    loja TEXT,
-    titulo TEXT,
-    mensagem TEXT NOT NULL,
-    url_limpa TEXT,
-    chave_final TEXT,
-    meu_link TEXT DEFAULT '',
-    msg_id TEXT DEFAULT '',
-    chat_id TEXT DEFAULT '',
-    origem TEXT DEFAULT '',
-    tentativas INTEGER NOT NULL DEFAULT 0,
-    deadline TEXT NOT NULL DEFAULT '',
-    criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-  );
-`);
-
-db.exec(`
   CREATE TABLE IF NOT EXISTS ofertas_enviadas (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     url_limpa TEXT UNIQUE NOT NULL,
@@ -139,38 +121,4 @@ export function listarFilaDb() {
 /** Remove um item da fila apos envio bem-sucedido. */
 export function removerDaFilaDb(id) {
   stmtFilaRemove.run(id);
-}
-
-/* ================= Fila de espera de midia (gate de imagem) ================= */
-/* Oferta sem foto pronta NAO entra na fila de envio: aguarda a midia do grupo
- * (re-hidratacao via getMessageById) ate o deadline; depois tenta o site e,
- * em ultimo caso, a logo da loja. Nada e enviado sem foto, nada e descartado.
- * deadline no formato "YYYY-MM-DD HH:MM:SS" (UTC, como CURRENT_TIMESTAMP). */
-
-const stmtEsperaInsere = db.prepare(
-  'INSERT INTO fila_espera_midia (loja, titulo, mensagem, url_limpa, chave_final, meu_link, msg_id, chat_id, origem, tentativas, deadline) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)'
-);
-const stmtEsperaLista = db.prepare('SELECT * FROM fila_espera_midia ORDER BY id ASC');
-const stmtEsperaToca = db.prepare('UPDATE fila_espera_midia SET tentativas = tentativas + 1 WHERE id = ?');
-const stmtEsperaRemove = db.prepare('DELETE FROM fila_espera_midia WHERE id = ?');
-
-function deadlineEspera(minutos) {
-  const d = new Date(Date.now() + minutos * 60000);
-  return d.toISOString().slice(0, 19).replace('T', ' ');
-}
-
-export function colocarEmEspera({ loja = '', titulo = '', mensagem = '', urlLimpa = '', chaveFinal = '', meuLink = '', msgId = '', chatId = '', origem = '', esperaMin = 60 }) {
-  return stmtEsperaInsere.run(loja, titulo, mensagem, urlLimpa, chaveFinal, meuLink, msgId, chatId, origem, deadlineEspera(esperaMin)).lastInsertRowid;
-}
-
-export function listarEspera() {
-  return stmtEsperaLista.all();
-}
-
-export function marcarTentativaEspera(id) {
-  stmtEsperaToca.run(id);
-}
-
-export function removerDaEspera(id) {
-  stmtEsperaRemove.run(id);
 }
