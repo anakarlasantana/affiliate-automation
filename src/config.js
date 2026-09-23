@@ -19,6 +19,15 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 export const ROOT_DIR = path.resolve(__dirname, '..');
 export const DATA_DIR = path.join(ROOT_DIR, 'data');
 export const TOKENS_DIR = path.join(ROOT_DIR, 'tokens');
+/**
+ * Foto fixa enviada quando a oferta cai no nivel "placeholder" da cascata
+ * (sem foto na mensagem e sem og:image no site). Versionada em
+ * assets/placeholder-confira-produto.png; PLACEHOLDER_IMAGEM permite
+ * apontar para outra arte sem mexer no codigo.
+ */
+export const PLACEHOLDER_PATH =
+  (process.env.PLACEHOLDER_IMAGEM || '').trim() ||
+  path.join(ROOT_DIR, 'assets', 'placeholder-confira-produto.png');
 for (const dir of [DATA_DIR, TOKENS_DIR]) {
   try {
     fs.mkdirSync(dir, { recursive: true });

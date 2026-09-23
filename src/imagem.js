@@ -2,13 +2,13 @@
  * imagem.js — Pipeline de imagem da oferta (cascata sem descarte).
  *
  * Politica: TODA oferta sai com foto, nenhuma e descartada por falta de imagem.
- * Cascata: 1. foto da mensagem | 2. foto do site | 3. placeholder da loja.
+ * Cascata: 1. foto da mensagem | 2. foto do site | 3. foto fixa "Confira o Produto no Link".
  * Envio SEMPRE via sendImageFromBase64(foto, legenda) — nunca sendText puro.
  */
 import fs from 'node:fs';
 import path from 'node:path';
 import zlib from 'node:zlib';
-import { DATA_DIR } from './config.js';
+import { DATA_DIR, PLACEHOLDER_PATH } from './config.js';
 
 /** Limite do WhatsApp para legenda de foto (~1024 chars). */
 export const LIMITE_LEGENDA_FOTO = 1000;
@@ -245,43 +245,49 @@ export async function baixarMidiaComRetry(
   return { base64: null, tentativas: MAX_TENTATIVAS };
 }
 /**
- * Placeholder por loja (ultimo nivel da cascata — nunca descarta oferta).
- * PNG 800x800 de cor da loja gerado sem dependencias nativas (zlib puro).
- * Se existir arte propria em data/placeholders/<loja>.png ela tem prioridade.
+ * Foto fixa de fallback (ultimo nivel da cascata — nunca descarta oferta).
+ * Quando a oferta nao tem foto na mensagem nem og:image no site, envia a
+ * arte `assets/placeholder-confira-produto.png` ("Confira o Produto no
+ * Link") para TODAS as lojas — sem PNG de cor solida por loja.
+ * PLACEHOLDER_IMAGEM (.env) permite trocar a arte sem mexer no codigo.
+ * O PNG solido gerado via zlib fica so como emergencia, se a arte sumir.
  */
-const PLACEHOLDERS = {
-  MercadoLivre: '#FFE600',
-  Shopee: '#EE4D2D',
-  Magalu: '#0086FF',
-  Amazon: '#FF9900',
-  Shein: '#000000',
-  TikTokShop: '#111111',
-};
-
 export function placeholderPara(loja) {
   const chave = String(loja || 'default');
-  if (cachePlaceholder.has(chave)) return { base64: cachePlaceholder.get(chave), origem: 'placeholder' };
-  const slug = chave.replace(/[^a-zA-Z0-9]+/g, '-').toLowerCase() || 'default';
-  const arquivo = path.join(DATA_DIR, 'placeholders', `${slug}.png`);
+  if (cachePlaceholder.has('global')) {
+    return { base64: cachePlaceholder.get('global'), origem: 'placeholder' };
+  }
   try {
-    if (fs.existsSync(arquivo)) {
-      const dataUrl = `data:image/png;base64,${fs.readFileSync(arquivo).toString('base64')}`;
+    if (PLACEHOLDER_PATH && fs.existsSync(PLACEHOLDER_PATH)) {
+      const dataUrl = `data:image/png;base64,${fs.readFileSync(PLACEHOLDER_PATH).toString('base64')}`;
       if (validarImagemBase64(dataUrl).valido) {
+        cachePlaceholder.set('global', dataUrl);
         cachePlaceholder.set(chave, dataUrl);
         return { base64: dataUrl, origem: 'placeholder' };
       }
+      console.warn(`   Placeholder customizado invalido (${PLACEHOLDER_PATH}) — usando emergencia.`);
+    } else {
+      console.warn(`   Placeholder customizado nao encontrado (${PLACEHOLDER_PATH}) — usando emergencia.`);
     }
-    const png = gerarPngSolido(PLACEHOLDERS[chave] || '#1F6FEB');
+  } catch (e) {
+    console.warn(`   Falha ao ler placeholder customizado (${textoErro(e)}) — emergencia.`);
+  }
+  try {
+    const png = gerarPngSolido('#1F6FEB');
+    const slug = chave.replace(/[^a-zA-Z0-9]+/g, '-').toLowerCase() || 'default';
+    const arquivo = path.join(DATA_DIR, 'placeholders', `${slug}.png`);
     try {
       fs.mkdirSync(path.dirname(arquivo), { recursive: true });
       fs.writeFileSync(arquivo, png);
     } catch { /* cache em memoria basta */ }
     const dataUrl = `data:image/png;base64,${png.toString('base64')}`;
+    cachePlaceholder.set('global', dataUrl);
     cachePlaceholder.set(chave, dataUrl);
     return { base64: dataUrl, origem: 'placeholder' };
   } catch (e) {
     console.warn(`   Falha ao gerar placeholder (${textoErro(e)}) — emergencia.`);
     const dataUrl = `data:image/png;base64,${gerarPngSolido('#1F6FEB').toString('base64')}`;
+    cachePlaceholder.set('global', dataUrl);
     cachePlaceholder.set(chave, dataUrl);
     return { base64: dataUrl, origem: 'placeholder' };
   }
