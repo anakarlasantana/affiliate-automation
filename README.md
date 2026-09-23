@@ -7,13 +7,13 @@ O **fluxo é genérico** (serve para qualquer loja); o que muda de loja para loj
 ## O que o sistema faz com cada oferta
 
 1. Captura a mensagem (texto + foto) dos grupos monitorados (WhatsApp e Telegram).
-2. Expande encurtadores (`meli.la`, `amzn.to`, `s.shopee...`) via HTTP, inclusive redirects por JavaScript / `<meta refresh>` (ex.: Promobit).
+2. Expande encurtadores (`meli.la`, `amzn.to`, `s.shopee...`, `promoby.me`) via HTTP, inclusive redirects por JavaScript / `<meta refresh>` **em cadeia de vários saltos** (ex.: Promobit: `promoby.me` → `api.promobit.com.br` → encurtador da loja).
 3. Desembrulha redes de afiliados (Awin, Lomadee...) e remove parâmetros de tracking de terceiros.
 4. Encontra a **página do produto**: se o link for intermediário (ex.: `mercadolivre.com.br/social/<perfil>`), o "mergulhador" da loja baixa o HTML e extrai o produto real.
 5. Detecta a loja e converte para o **seu** link de afiliado.
 6. **Remove todos os outros links da mensagem** (linktr.ee, `t.me` de concorrentes...) — só o seu permanece.
 7. **Remove linhas promocionais de outros grupos/canais** ("compartilhe", "participe do canal"...) mantendo título, preço, cupom e forma de pagamento.
-8. Busca a **imagem**: usa a foto da mensagem ou, na falta dela, a `og:image`/`twitter:image` da página da loja.
+8. Busca a **imagem**: usa a foto da mensagem ou, na falta dela, a `og:image`/`twitter:image` da página da loja. Fontes em `FONTES_FOTO_SOMENTE_SITE` (ex.: grupo Promobit) **ignoram a foto da mensagem** — a imagem sai sempre do site do produto.
 9. Adiciona o rodapé com o convite do **seu** grupo (`MEU_GRUPO_LINK`).
 10. Entra na fila anti-ban (ritmo por horário + limite diário) e publica no seu grupo.
 
@@ -59,6 +59,9 @@ Na primeira execução:
 | Shein | `SHEIN_AFFILIATE_ID` | parâmetro `aff_id`; id do produto em `-p-<id>.html` |
 | TikTok Shop | `TIKTOKSHOP_AFFILIATE_ID` | parâmetro `affiliate_id`; só `/product/<id>` é oferta (vídeo/perfil é ignorado) |
 | Genérica | `AFFILIATE_GENERIC_N` | formato `dominio.com:parametro:sua_chave` |
+
+> Pesquisa detalhada por loja (formatos de link, parâmetros de rastreamento,
+> lacunas adiadas e como revalidar): [`docs/links-afiliados-por-loja.md`](docs/links-afiliados-por-loja.md).
 
 ## Perfil da Loja (ajustar/adicionar loja sem mexer no pipeline)
 
@@ -195,6 +198,8 @@ MEU_GRUPO_WHATSAPP=1203634...@g.us           # ID do seu grupo (destino das ofer
 MEU_GRUPO_LINK=https://chat.whatsapp.com/... # convite do seu grupo (rodapé das ofertas)
 MAX_ENVIOS_DIA=150                           # limite diário anti-ban (0 = sem limite)
 SHOPEE_SUB_ID=hi-cleo                        # marca d'água dos short links da Shopee
+FONTES_FOTO_SOMENTE_SITE=whatsapp:12036...@g.us  # fontes cuja foto da mensagem é IGNORADA
+                                                # (imagem vem sempre do site do produto)
 ```
 
 > ⚠️  `MEU_GRUPO_LINK` deve ser o **link de convite** (WhatsApp → seu grupo → "Convidar via link"), **não** o ID interno `@g.us`.
@@ -214,6 +219,7 @@ src/
     ├── mercadolivre.js  shopee.js  amazon.js  magalu.js
     └── shein.js  tiktokshop.js  generic.js
 data/                 # ofertas.db (SQLite) e fila-status.json
+docs/                 # documentação (pesquisa de links por loja, etc.)
 tokens/               # sessão do Chrome/WhatsApp (login do wppconnect)
 ```
 

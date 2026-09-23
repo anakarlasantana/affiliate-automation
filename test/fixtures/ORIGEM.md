@@ -9,6 +9,7 @@ Extraidas da tabela `fila_envio` (data/ofertas.db) e do backup
 | foto-og-image-322x500.jpg | fila_envio id 239 (`site:og-image`) | 322x500 | POSITIVO: 15 KB e foto de verdade |
 | foto-og-image-500x459.webp | fila_envio id 242 (`site:og-image`) | 500x459 | POSITIVO: cobertura de WebP |
 | placeholder-800x800.png | fila_envio id 215 (`placeholder`) | 800x800 | POSITIVO: PNG gerado por placeholderPara() |
+| promoby-redirect.html | HTML real de `promoby.me/rvz4mkwdgf7` (23/09/2026): 301 → `api.promobit.com.br/v4/redirect/...` + redirect JS `l = '...'` | — | Redirect JS do Promobit (extrairRedirectJS) |
 
 Os 15 KB do og-image 322x500 sao a prova de que TAMANHO EM BYTES nao
 separa miniatura de foto (as miniaturas de 72x72 tem ate 2,5 KB): a

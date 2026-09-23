@@ -9,6 +9,9 @@ const USER_AGENT =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 ' +
   '(KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36';
 
+/** Máximo de saltos (HTTP + JS) numa mesma expansão de link. */
+const MAX_SALTOS_EXPANSAO = 4;
+
 /** Parâmetros de tracking removidos na sanitização. */
 const PARAMS_MOALDITOS = [
   /^utm_/i, /^tag$/i, /^assoc_id$/i, /^ascsubtag$/i, /^linkcode$/i,
@@ -18,6 +21,12 @@ const PARAMS_MOALDITOS = [
   /^vj$/i, /^sck$/i, /^_ims$/i, /^scm$/i, /^spm$/i, /^force flush$/i,
   /^gclsrc$/i, /^msclkid$/i, /^_gl$/i, /^mc_eid$/i, /^mc_cid$/i,
   /^vero_id$/i, /^wickedid$/i, /^igshid$/i, /^yclid$/i, /^_openstat$/i,
+  // Wrappers de afiliado/app mobile de terceiros — GENÉRICOS (valem para
+  // qualquer loja). Caso real: link Shopee opaanlp carregando mmp_pid/
+  // gads_t_sig/__mobile__/exp_group/credential_token de OUTRO afiliado,
+  // que sujava a URL enviada à API e gerava shortlink frágil.
+  /^mmp_/i, /^gads_/i, /^__mobile__$/i, /^exp_group$/i, /^credential_token$/i,
+  /^forceInApp$/i, /^ttclid$/i, /^twclid$/i, /^dclid$/i, /^srsltid$/i,
 ];
 
 /** Domínios de tracking/ads que nunca são o destino real da oferta. */
@@ -33,7 +42,7 @@ const TRACKER_REGEX =
  * @param {string} urlBase URL da página analisada
  * @returns {string|null} URL de destino ou null
  */
-function extrairRedirectJS(html, urlBase) {
+export function extrairRedirectJS(html, urlBase) {
   if (!html || typeof html !== 'string') return null;
 
   let hostBase = '';
@@ -52,6 +61,9 @@ function extrairRedirectJS(html, urlBase) {
     /window\.location(?:\.href)?\s*=\s*['"](https?:\/\/[^'"]+)['"]/,
     /location\.replace\(\s*['"](https?:\/\/[^'"]+)['"]\s*\)/,
     /<meta[^>]+http-equiv=["']?refresh["']?[^>]*content=["'][^"']*url=(https?:\/\/[^"'\s>]+)/i,
+    // Fallback: a página de redirect do Promobit anuncia o destino também no
+    // âncora "clique aqui" — cobre casos em que o JS mude de formato.
+    /<a[^>]+href=["'](https?:\/\/[^"']+)["'][^>]*>[^<]*clique\s+aqui/i,
   ];
 
   for (const padrao of padroes) {
@@ -70,21 +82,22 @@ function extrairRedirectJS(html, urlBase) {
 }
 
 /**
- * Segue a cadeia de redirecionamentos até a URL final do marketplace.
- * Além de redirects HTTP (301/302), detecta páginas intermediárias que
- * redirecionam via JavaScript/meta refresh (ex.: links /Redirect do Promobit).
- * @param {string} urlEncurtada
- * @returns {Promise<string>} URL final (ou a original em caso de erro).
+ * Um salto de expansão: segue os redirects HTTP (301/302) de `urlAtual` e,
+ * se a página final for HTML com redirect via JavaScript/meta refresh, devolve
+ * o destino apontado (ex.: promoby.me -> api.promobit.com.br/v4/redirect/...).
+ * @param {string} urlAtual
+ * @returns {Promise<{ urlFinal: string, destino: string|null }>}
  */
-export async function expandirLink(urlEncurtada) {
+async function expandirUmSalto(urlAtual) {
   try {
-    const resposta = await axios.get(urlEncurtada, {
+    const resposta = await axios.get(urlAtual, {
       maxRedirects: 8,
       timeout: 15000,
       headers: { 'User-Agent': USER_AGENT, Accept: 'text/html,*/*' },
       validateStatus: (s) => s >= 200 && s < 400,
     });
-    const urlFinal = resposta?.request?.res?.responseUrl || resposta?.config?.url || urlEncurtada;
+    const urlFinal =
+      resposta?.request?.res?.responseUrl || resposta?.config?.url || urlAtual;
 
     // Página 200 com redirect via JS? Extrai o destino real (só dispara quando
     // a resposta é HTML de uma página intermediária — links diretos de loja
@@ -92,27 +105,54 @@ export async function expandirLink(urlEncurtada) {
     const contentType = String(resposta?.headers?.['content-type'] || '');
     if (contentType.includes('text/html') && typeof resposta.data === 'string') {
       const destino = extrairRedirectJS(resposta.data, urlFinal);
-      if (destino) {
-        console.log(`   ↳ Redirect JS detectado: ${destino.slice(0, 90)}...`);
-        return destino;
-      }
+      return { urlFinal, destino };
     }
-    return urlFinal;
+    return { urlFinal, destino: null };
   } catch (erro) {
     // Fallback: alguns encurtadores respondem melhor a HEAD
     try {
-      const resposta = await axios.head(urlEncurtada, {
+      const resposta = await axios.head(urlAtual, {
         maxRedirects: 8,
         timeout: 10000,
         headers: { 'User-Agent': USER_AGENT },
         validateStatus: (s) => s >= 200 && s < 400,
       });
-      return resposta?.request?.res?.responseUrl || urlEncurtada;
+      return {
+        urlFinal: resposta?.request?.res?.responseUrl || urlAtual,
+        destino: null,
+      };
     } catch {
-      console.warn(`⚠️  Falha ao expandir ${urlEncurtada}: ${erro.message}`);
-      return urlEncurtada;
+      console.warn(`⚠️  Falha ao expandir ${urlAtual}: ${erro.message}`);
+      return { urlFinal: urlAtual, destino: null };
     }
   }
+}
+
+/**
+ * Segue a cadeia de redirecionamentos até a URL final do marketplace.
+ * Além de redirects HTTP (301/302), detecta páginas intermediárias que
+ * redirecionam via JavaScript/meta refresh (ex.: promoby.me e /Redirect do
+ * Promobit) e RE-EXPANDE o destino — o Promobit encadeia
+ * promoby.me -> api.promobit.com.br/v4/redirect/<código> -> encurtador da
+ * loja (meli.la, s.shopee...), então um único salto parava no encurtador e
+ * a URL "limpa" ficava suja. Máximo de MAX_SALTOS_EXPANSAO saltos, com
+ * guarda de loop (URL já visitada não é reprocessada).
+ * @param {string} urlEncurtada
+ * @returns {Promise<string>} URL final (ou a original em caso de erro).
+ */
+export async function expandirLink(urlEncurtada) {
+  let atual = urlEncurtada;
+  const visitadas = new Set();
+  for (let salto = 0; salto < MAX_SALTOS_EXPANSAO; salto++) {
+    if (visitadas.has(atual)) break;
+    visitadas.add(atual);
+    const { urlFinal, destino } = await expandirUmSalto(atual);
+    if (!destino) return urlFinal;
+    console.log(`   ↳ Redirect JS detectado: ${destino.slice(0, 90)}...`);
+    // Próximo salto parte do DESTINO (não da página intermediária).
+    atual = destino;
+  }
+  return atual;
 }
 
 /**
@@ -230,7 +270,12 @@ export async function extrairImagemProduto(urlProduto) {
         if (html && /og:image|twitter:image/i.test(html)) break;
       } catch { /* tenta o próximo UA */ }
     }
-    if (!html) return null;
+    // Sem log aqui o sintoma fica invisível: a oferta cai no placeholder sem
+    // dizer QUAL página foi testada (foi assim que o caso Shopee passou batido).
+    if (!html) {
+      console.log(`   🔎 Site sem HTML utilizável para foto: ${urlProduto}`);
+      return null;
+    }
 
     // meta tags de preview: og:image / twitter:image / og:image:secure_url
     // (com property antes ou depois do content, aspas simples ou duplas)
@@ -260,7 +305,10 @@ export async function extrairImagemProduto(urlProduto) {
         origem = 'site:img-tag';
       }
     }
-    if (!urlImagem) return null;
+    if (!urlImagem) {
+      console.log(`   🔎 Página sem og:image/imagem utilizável: ${urlProduto}`);
+      return null;
+    }
 
     // URLs relativas/protocol-relative
     if (urlImagem.startsWith('//')) urlImagem = 'https:' + urlImagem;

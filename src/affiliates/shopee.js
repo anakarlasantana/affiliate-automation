@@ -23,17 +23,34 @@ export class ShopeeProvider extends AffiliateProvider {
   /** Shopee: o produto é identificado por shopId.itemId (-i.123.456). */
   static perfil = {
     urlNaoProduto: [/\/m\//, /\/universal-link\//, /\/cart(\/|$)/],
-    mergulhador: null,
+    /**
+     * Wrapper de afiliado da Shopee no formato /opaanlp/<shopId>/<itemId>
+     * (compartilhamento do app; aponta para outro afiliado via mmp_pid).
+     * Não é a página canônica do produto, mas os IDs estão no path —
+     * canonicaliza SEM rede, para /product/<shop>/<item>.
+     */
+    mergulhador: {
+      nome: 'Shopee opaanlp (wrapper do app)',
+      matches: (url) => /\/opaanlp\/\d+\/\d+/.test(String(url)),
+      extrair: (url) => {
+        const m = String(url).match(/\/opaanlp\/(\d+)\/(\d+)/);
+        return m ? `https://shopee.com.br/product/${m[1]}/${m[2]}` : null;
+      },
+    },
     idProduto: (url) => {
       const porSlug = url.pathname.match(/-i\.(\d+)\.(\d+)/);
       if (porSlug) return `shopee:${porSlug[1]}.${porSlug[2]}`;
       const porProduto = url.pathname.match(/\/product\/(\d+)\/(\d+)/);
-      return porProduto ? `shopee:${porProduto[1]}.${porProduto[2]}` : null;
+      if (porProduto) return `shopee:${porProduto[1]}.${porProduto[2]}`;
+      // Wrapper ainda não canonicalizado (ex.: expansão do shortlink gerado)
+      const porWrapper = url.pathname.match(/\/opaanlp\/(\d+)\/(\d+)/);
+      return porWrapper ? `shopee:${porWrapper[1]}.${porWrapper[2]}` : null;
     },
-    /** parâmetros de compartilhamento da Shopee */
+    /** parâmetros de compartilhamento da Shopee + rastros de afiliado de terceiros */
     paramsRemover: [
       /^smtt$/i, /^smid$/i, /^share_channel$/i, /^is_from_login$/i,
       /^uls_trackid$/i, /^sp_atk$/i, /^af_siteid$/i,
+      /^mmp_/i, /^gads_/i, /^__mobile__$/i, /^exp_group$/i, /^credential_token$/i,
     ],
   };
 
@@ -51,7 +68,10 @@ export class ShopeeProvider extends AffiliateProvider {
     }
 
     const subId = config.afiliados.shopee.subId;
-    const query = `mutation{generateShortLink(input:{originUrl:"${urlLimpa.replace(/"/g, '\\"')}",subIds:["${subId}"]}){shortLink}}`;
+    // subIds:[""] está fora do contrato da API: omite o campo quando não há
+    // marca d'água configurada, em vez de enviar string vazia.
+    const campoSubIds = subId ? `,subIds:["${subId.replace(/"/g, '\\"')}"]` : '';
+    const query = `mutation{generateShortLink(input:{originUrl:"${urlLimpa.replace(/"/g, '\\"')}"${campoSubIds}}){shortLink}}`;
     const payload = JSON.stringify({ query });
     const timestamp = Math.floor(Date.now() / 1000).toString();
     const assinatura = crypto

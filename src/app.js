@@ -18,6 +18,7 @@ import config, {
   DATA_DIR,
   horaOperacional,
   inicioDoDiaOperacional,
+  origemSoFotoSite,
 } from "./config.js";
 import {
   contarEnviosHoje,
@@ -206,6 +207,37 @@ async function processarOferta(
           }
           continue;
         }
+        // Validação pós-conversão: o link GERADO precisa apontar para o MESMO
+        // produto na MESMA loja. Sem isso, um shortlink frágil (URL suja de
+        // terceiro enviada à API) seria publicado abrindo a página errada.
+        const lojaOriginal = perfilDeUrl(urlTentativa)?.loja || null;
+        const lojaGerada = perfilDeUrl(conv.meuLink)?.loja || null;
+        if (!lojaGerada || (lojaOriginal && lojaGerada !== lojaOriginal)) {
+          console.log(
+            `   ⚠️  Link gerado fora da loja original (${lojaOriginal || '?'} → ${lojaGerada || conv.meuLink}) — oferta NÃO enviada; tentando próximo link...`,
+          );
+          continue;
+        }
+        if (chaveProdutoAtual) {
+          let chaveGerada = chaveProduto(conv.meuLink);
+          if (!chaveGerada) {
+            try {
+              chaveGerada = chaveProduto(await expandirLink(conv.meuLink));
+            } catch {
+              /* sem expansão: comparação fica só no domínio (acima) */
+            }
+          }
+          if (!chaveGerada) {
+            console.warn(
+              `   ⚠️  Não foi possível confirmar o produto do link gerado — aceitando por domínio (${lojaGerada}).`,
+            );
+          } else if (chaveGerada !== chaveProdutoAtual) {
+            console.log(
+              `   ⚠️  Produto divergente: original ${chaveProdutoAtual} x gerado ${chaveGerada} — oferta NÃO enviada; tentando próximo link...`,
+            );
+            continue;
+          }
+        }
         linkCru = linkTentativa;
         urlLimpa = urlTentativa;
         meuLink = conv.meuLink;
@@ -229,6 +261,8 @@ async function processarOferta(
     console.log(`   ↳ [${loja}] Meu link: ${meuLink}`);
 
     // Cascata de imagem (nenhuma oferta sai sem foto):
+    //  0. fonte em FONTES_FOTO_SOMENTE_SITE (ex.: grupo Promobit): a foto da
+    //     mensagem é o CARD DELES, não o produto — descarta e força o site;
     //  1. foto da mensagem original (ja vem em imagemBase64);
     //  2. foto oficial do site (og:image da URL canonica do produto);
     //  3. placeholder da loja (assets locais) — ultimo recurso, nunca descarta.
@@ -236,6 +270,13 @@ async function processarOferta(
     // (mensagem:body | mensagem:download | mensagem:miniatura) — assim o
     // `npm run status` mostra na hora se alguma oferta saiu degradada.
     let origemFoto = imagemBase64 ? origemFotoMidia || "mensagem" : null;
+    if (imagemBase64 && origemSoFotoSite(origem)) {
+      console.log(
+        `   🖼️  [${origem}] foto da mensagem ignorada por regra (FONTES_FOTO_SOMENTE_SITE) — buscando no site do produto.`,
+      );
+      imagemBase64 = null;
+      origemFoto = null;
+    }
     if (imagemBase64) {
       const v = validarImagemBase64(String(imagemBase64));
       if (!v.valido) {
@@ -267,7 +308,7 @@ async function processarOferta(
           }
         } else {
           console.log(
-            "   🖼️  Site sem foto util — usando placeholder da loja.",
+            `   🖼️  Site sem foto util (${urlLimpa}) — usando placeholder da loja.`,
           );
         }
       } catch (e) {

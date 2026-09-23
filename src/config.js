@@ -114,6 +114,18 @@ function lista(envValue) {
     .filter(Boolean);
 }
 
+/**
+ * Normaliza uma entrada de origem para comparação:
+ * "whatsapp:12036...@g.us" / "@promobit_oficial" → "12036...@g.us" / "promobit_oficial".
+ */
+export function normalizarOrigem(valor) {
+  return String(valor || '')
+    .trim()
+    .toLowerCase()
+    .replace(/^(whatsapp|telegram):/, '')
+    .replace(/^@/, '');
+}
+
 /** Converte "min,max" do .env em objeto numérico. */
 function faixaSegundos(envValue, padraoMin, padraoMax) {
   const [min, max] = (envValue || '').split(',').map(Number);
@@ -151,6 +163,13 @@ const config = {
   operacao: {
     /** Fuso usado nas janelas de envio e na virada do dia (anti-ban) */
     tz: tzOperacao,
+    /**
+     * Origens (grupos/canais monitorados) cuja oferta tem a foto da mensagem
+     * IGNORADA — a imagem vem sempre do site do produto (og:image). Caso real:
+     * o grupo Promobit envia um card com a marca deles, não o produto.
+     * Aceita "whatsapp:<id>@g.us", "<id>@g.us", "@canal" ou "canal".
+     */
+    fontesSoFotoSite: lista(process.env.FONTES_FOTO_SOMENTE_SITE),
   },
   telegram: {
     apiId: parseInt(process.env.TELEGRAM_API_ID || '0', 10),
@@ -251,3 +270,18 @@ validarObrigatorias([
 ]);
 
 export default config;
+
+/**
+ * A origem da mensagem está entre as que DEVEM IGNORAR a foto da própria
+ * mensagem (FONTES_FOTO_SOMENTE_SITE)? Comparação normalizada — tanto faz
+ * "whatsapp:12036...@g.us" quanto só o ID, "@canal" ou "canal".
+ * @param {string} origem ex.: "whatsapp:120363419781062962@g.us" | "telegram:@promobit_oficial"
+ * @returns {boolean}
+ */
+export function origemSoFotoSite(origem) {
+  const alvo = normalizarOrigem(origem);
+  if (!alvo) return false;
+  return config.operacao.fontesSoFotoSite.some(
+    (fonte) => normalizarOrigem(fonte) === alvo,
+  );
+}
