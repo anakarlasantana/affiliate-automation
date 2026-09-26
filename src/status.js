@@ -6,7 +6,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { DATA_DIR } from './config.js';
 import { resumoLojas } from './affiliates/index.js';
-import { contarEnviosHoje } from './database.js';
+import { contarEnviosHoje, contarOrigemDasFotos } from './database.js';
 
 /** Caminho absoluto (config): funciona mesmo rodando de outro diretorio. */
 const caminho = path.join(DATA_DIR, 'fila-status.json');
@@ -46,6 +46,24 @@ if (!s.pendentes || s.pendentes.length === 0) {
   for (const p of s.pendentes) {
     console.log(`     ${p.posicao}. [${p.loja}] ${p.titulo}`);
   }
+}
+
+// Saúde da cascata de imagem: de onde veio a foto de cada oferta enfileirada.
+// `placeholder` alto = oferta saiu sem foto real (investigue loja/URL).
+const origens = contarOrigemDasFotos();
+if (origens.length) {
+  const total = origens.reduce((s, o) => s + o.total, 0);
+  const comFotoReal = origens.filter((o) => o.origem !== 'placeholder').length;
+  console.log(`\n🖼️  FOTO DAS OFERTAS NA FILA (${total} enfileiradas)`);
+  for (const { origem, total: n } of origens) {
+    const pct = Math.round((n / total) * 100);
+    console.log(`     ${String(pct).padStart(3)}%  ${origem} (${n})`);
+  }
+  console.log(
+    comFotoReal === origens.length
+      ? '   ✅ Todas com foto real (nenhum placeholder).'
+      : `   ⚠️  ${origens.length - comFotoReal} origem(ns) degradada(s) — oferta sem foto do produto.`
+  );
 }
 
 mostrarLojasSemCredencial();

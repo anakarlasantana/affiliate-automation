@@ -241,6 +241,79 @@ export function desembrulharAfiliadoRedirecionador(url) {
 }
 
 /**
+ * RESOLUÇÃO ALTA (Nível 2.5) — upgrade da foto sem trocar de fonte.
+ *
+ * A Magalu serve a MESMA foto em vários tamanhos e o tamanho vem no CAMINHO
+ * da URL (a-static.mlcdn.com.br/470x352/.../arquivo.jpg). O og:image aponta
+ * para a miniatura (470x352, ~16 KB) — por isso a foto do Magalu saía em
+ * resolução baixa no grupo. Reescrevendo o segmento do tamanho, o mesmo
+ * arquivo vem em resolução cheia (validado ao vivo: 1280x1280 -> 116 KB,
+ * 1280x965).
+ *
+ * Só reescreve CDN que tem o tamanho no caminho e que SEMPRE devolve 200
+ * nesse formato; qualquer outro host fica intacto (fallback silencioso).
+ */
+const CDN_COM_TAMANHO = /^(https:\/\/a-static\.mlcdn\.com\.br\/)(\d+x\d+|\{w\}x\{h\})(\/.*)$/i;
+
+/** Maior resolução pedida no upgrade (acima disso o ganho não paga o download). */
+const TAMANHO_ALVO = '1280x1280';
+
+/**
+ * Reescreve a URL de uma CDN com tamanho no caminho para a resolução alta.
+ * @param {string} url
+ * @returns {string|null} nova URL ou null quando não é uma CDN aplicável
+ */
+export function subirResolucao(url) {
+  if (!url) return null;
+  const m = String(url).match(CDN_COM_TAMANHO);
+  if (!m) return null;
+  const [, base, , resto] = m;
+  // O próprio `{w}x{h}` é placeholder de template: trocar pelo tamanho alvo
+  // também funciona e evita baixar uma URL que nunca existiu.
+  return `${base}${TAMANHO_ALVO}${resto}`;
+}
+
+/**
+ * Descarta as URLs de galeria que não são foto do produto: sprite, logo,
+ * badge, placeholder e ícones. Genérico o bastante para qualquer loja
+ * (mlstatic, mlcdn, shopee, magalu) — não é hack por CDN.
+ */
+const RUIDO_GALERIA =
+  /frontend-assets|sprite|logo|badge|icon|placeholder|blank|spacer|pixel|tracker|banner|selo|\.svg|\/D_NQ_\/|\/D_Q_NP_\//i;
+
+/**
+ * Coleta as URLs de imagem da galeria a partir do HTML do produto.
+ * Ordena pela maior resolução aparente (o `og:image` costuma vir primeiro e
+ * em tamanho cheio, então ele é a primeira opção).
+ *
+ * @param {string} html
+ * @returns {string[]} URLs absolutas candidatas
+ */
+export function extrairGaleria(html) {
+  if (!html || typeof html !== 'string') return [];
+  const achadas = [
+    ...html.matchAll(
+      /https:\/\/[a-z0-9.-]*(?:mlstatic|mlcdn|shopee|shopeeimg|magazineluiza|magazinevoce)[a-z0-9.-]*\.[a-z]{2,6}\/[^"'\s\\<>]+?\.(?:jpg|jpeg|png|webp)/gi,
+    ),
+  ].map((m) => m[0]);
+  const unicas = [...new Set(achadas)].filter((u) => !RUIDO_GALERIA.test(u));
+  // Chave de ordenação: o nome do arquivo do Meli traz o MLB/tamanho
+  // (D_Q_NP_926032-MLB81783442178_012025-V-nome.jpg) — o maior vence.
+  return unicas.sort((a, b) => scoreGaleria(b) - scoreGaleria(a));
+}
+
+/** Nota grosseira de qualidade: variantes grandes (V/O/F) antes das miniaturas. */
+function scoreGaleria(url) {
+  const u = String(url);
+  const variante = u.match(/_(?:V|O|F)-|_V\d+-|-I\.|_C\./i);
+  let score = variante ? 10 : 0;
+  const tam = u.match(/(\d{2,4})x(\d{2,4})/);
+  if (tam) score += Math.min(20, Math.max(Number(tam[1]), Number(tam[2])) / 100);
+  if (/-{2,}/.test(u)) score -= 1; // URL com placeholder {w}x{h}
+  return score;
+}
+
+/**
  * Extrai a FOTO DO PRODUTO da página da loja (nível 2 da cascata de imagem).
  * Usa og:image / twitter:image / og:image:secure_url / JSON-LD / <img>.
  * Retorna { base64, origem } — origem indica qual extrator achou.
@@ -249,6 +322,110 @@ export function desembrulharAfiliadoRedirecionador(url) {
  * @returns {Promise<{ base64: string, origem: string }|null>}
  */
 export async function extrairImagemProduto(urlProduto) {
+  return extrairImagemDaPagina(urlProduto, { permitirGaleria: false });
+}
+
+/**
+ * Igual a extrairImagemProduto, mas aceita a GALERIA da página como origem
+ * de imagem (Nível 2.5). Usada quando a oferta não tem foto nem og:image:
+ * nas lojas que não têm API pública de imagem (Mercado Livre), a galeria é a
+ * única fonte que devolve a foto do produto.
+ *
+ * @param {string} urlProduto
+ * @returns {Promise<{ base64: string, origem: string }|null>}
+ */
+export async function extrairImagemDaLoja(urlProduto) {
+  return extrairImagemDaPagina(urlProduto, { permitirGaleria: true });
+}
+
+/**
+ * Baixa a imagem de uma URL DIRETA (o que a API oficial da loja devolve —
+ * ex.: a `imageUrl` do ProductOfferV2 da Shopee). Não é uma página: não há
+ * HTML nem meta tag, só o arquivo. Passa pelo mesmo upgrade de resolução
+ * quando a CDN permitir, para a foto da API sair na mesma qualidade das
+ * demais.
+ *
+ * @param {string} urlImagem
+ * @returns {Promise<{ base64: string, origem: string }|null>}
+ */
+export async function extrairImagemDeUrl(urlImagem) {
+  if (!urlImagem) return null;
+  try {
+    const baixada = await baixarComUpgrade(urlImagem);
+    if (!baixada) return null;
+    const origem = baixada.origem || 'loja:api-imagem';
+    console.log(
+      `   🖼️  Foto [${origem}] (${Math.round(baixada.bytes / 1024)} KB) — ${String(urlImagem).slice(0, 76)}`,
+    );
+    return { base64: baixada.dataUrl, origem };
+  } catch (erro) {
+    console.warn(`   ⚠️  Falha ao baixar a imagem informada: ${erro.message}`);
+    return null;
+  }
+}
+
+/** Baixa uma URL de imagem e devolve data-URL (ou null se não for imagem). */
+async function baixarImagem(urlImagem) {
+  const img = await axios.get(urlImagem, {
+    timeout: 12000,
+    responseType: 'arraybuffer',
+    headers: { 'User-Agent': USER_AGENT, Accept: 'image/*,*/*' },
+    validateStatus: (s) => s >= 200 && s < 400,
+  });
+  const contentType = String(img.headers['content-type'] || 'image/jpeg').split(';')[0].trim();
+  if (!/^image\/(jpeg|jpg|png|webp|gif)/i.test(contentType)) return null;
+  // Rejeita imagem quebrada / pixel de tracking
+  const buf = Buffer.from(img.data);
+  if (buf.length < 5 * 1024) return null;
+  return { dataUrl: `data:${contentType};base64,${buf.toString('base64')}`, bytes: buf.length };
+}
+
+/**
+ * Baixa a imagem preferindo a resolução ALTA quando a CDN permite reescrever
+ * o tamanho (Magalu). Se a versão alta falhar, devolve a original — nunca
+ * perde a oferta por causa do upgrade.
+ */
+async function baixarComUpgrade(urlImagem) {
+  const alta = subirResolucao(urlImagem);
+  if (alta && alta !== urlImagem) {
+    try {
+      const r = await baixarImagem(alta);
+      if (r) return { ...r, origem: 'site:og-image-hd' };
+    } catch { /* cai para a original */ }
+  }
+  const normal = await baixarImagem(urlImagem);
+  return normal ? { ...normal, origem: null } : null;
+}
+
+/**
+ * Deriva a URL CANÔNICA do produto a partir de uma URL que respondeu 404.
+ * O Mercado Livre tirou do ar a página www.../MLB-<id>-<slug>-_JM mas mantém
+ * a canônica em outro host: produto.mercadolivre.com.br/MLB-<id>-_JM. Sem
+ * isso a busca de foto caía no placeholder mesmo com o produto no ar.
+ * @param {string} url
+ * @returns {string|null}
+ */
+export function urlCanonicaDeProduto(url) {
+  let u;
+  try {
+    u = new URL(url);
+  } catch {
+    return null;
+  }
+  const mlb = u.pathname.match(/\/MLB-(\d{9,})/i) || u.pathname.match(/\/p\/(MLB\d+)/i);
+  if (mlb) {
+    const id = mlb[1].replace(/^MLB-?/, '');
+    return `https://produto.mercadolivre.com.br/MLB-${id}-_JM`;
+  }
+  return null;
+}
+
+/**
+ * Corpo compartilhado por extrairImagemProduto/extrairImagemDaLoja.
+ * @param {string} urlProduto
+ * @param {{ permitirGaleria: boolean }} opcoes
+ */
+async function extrairImagemDaPagina(urlProduto, { permitirGaleria }) {
   try {
     // Algumas lojas (ex.: Mercado Livre) só servem as meta tags de preview
     // para crawlers de link-preview (Facebook/WhatsApp). Tentamos os dois UAs.
@@ -268,7 +445,19 @@ export async function extrairImagemProduto(urlProduto) {
         });
         html = typeof resposta.data === 'string' ? resposta.data : '';
         if (html && /og:image|twitter:image/i.test(html)) break;
-      } catch { /* tenta o próximo UA */ }
+      } catch (e) {
+        // 404 é DEFINITIVO: a página canônica existe e a com slug não. Repetir
+        // com outro User-Agent só gasta 3x o tempo — tenta a canônica logo.
+        if (e.response?.status === 404) {
+          const canonica = urlCanonicaDeProduto(urlProduto);
+          if (canonica && canonica !== urlProduto) {
+            console.log(`   ↪ 404 na página do produto; tentando a URL canônica: ${canonica}`);
+            return extrairImagemDaPagina(canonica, { permitirGaleria });
+          }
+          break;
+        }
+        /* tenta o próximo UA */
+      }
     }
     // Sem log aqui o sintoma fica invisível: a oferta cai no placeholder sem
     // dizer QUAL página foi testada (foi assim que o caso Shopee passou batido).
@@ -305,29 +494,41 @@ export async function extrairImagemProduto(urlProduto) {
         origem = 'site:img-tag';
       }
     }
-    if (!urlImagem) {
+    // NÍVEL 2.5 — galeria da própria página. Necessária nas lojas sem API
+    // pública de imagem (Mercado Livre: a API oficial responde 403 sem token).
+    // Só entra aqui quando o og:image NÃO resolveu; com og:image, a galeria
+    // é redundante (e o upgrade de resolução já foi aplicado nele).
+    const candidatasGaleria = permitirGaleria ? extrairGaleria(html).slice(0, 4) : [];
+    if (!urlImagem && !candidatasGaleria.length) {
       console.log(`   🔎 Página sem og:image/imagem utilizável: ${urlProduto}`);
       return null;
     }
 
-    // URLs relativas/protocol-relative
-    if (urlImagem.startsWith('//')) urlImagem = 'https:' + urlImagem;
-    else if (urlImagem.startsWith('/')) urlImagem = new URL(urlProduto).origin + urlImagem;
-    if (!/^https?:\/\//i.test(urlImagem)) return null;
+    /** Absolutiza a URL, baixa (com upgrade) e registra a origem. */
+    const tentar = async (url, rotulo) => {
+      let alvo = url;
+      if (alvo.startsWith('//')) alvo = 'https:' + alvo;
+      else if (alvo.startsWith('/')) alvo = new URL(urlProduto).origin + alvo;
+      if (!/^https?:\/\//i.test(alvo)) return null;
+      const baixada = await baixarComUpgrade(alvo);
+      if (!baixada) return null;
+      const final = baixada.origem || rotulo;
+      console.log(
+        `   🖼️  Foto do produto [${final}] (${Math.round(baixada.bytes / 1024)} KB) — ${alvo.slice(0, 76)}`,
+      );
+      return { base64: baixada.dataUrl, origem: final };
+    };
 
-    const img = await axios.get(urlImagem, {
-      timeout: 12000,
-      responseType: 'arraybuffer',
-      headers: { 'User-Agent': USER_AGENT, Accept: 'image/*,*/*' },
-      validateStatus: (s) => s >= 200 && s < 400,
-    });
-    const contentType = String(img.headers['content-type'] || 'image/jpeg').split(';')[0].trim();
-    if (!/^image\/(jpeg|jpg|png|webp|gif)/i.test(contentType)) return null;
-    // Rejeita imagem quebrada / pixel de tracking
-    const buf = Buffer.from(img.data);
-    if (buf.length < 5 * 1024) return null;
-
-    return { base64: `data:${contentType};base64,${buf.toString('base64')}`, origem };
+    if (urlImagem) {
+      const r = await tentar(urlImagem, origem);
+      if (r) return r;
+    }
+    for (const [i, url] of candidatasGaleria.entries()) {
+      const r = await tentar(url, 'site:galeria');
+      if (r) return { ...r, origem: `site:galeria#${i + 1}` };
+    }
+    console.log(`   🔎 Nenhuma imagem da página pôde ser baixada: ${urlProduto}`);
+    return null;
   } catch (erro) {
     console.warn(`   ⚠️  Falha ao buscar foto do produto: ${erro.message}`);
     return null;

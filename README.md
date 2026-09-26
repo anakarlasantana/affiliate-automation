@@ -13,7 +13,16 @@ O **fluxo é genérico** (serve para qualquer loja); o que muda de loja para loj
 5. Detecta a loja e converte para o **seu** link de afiliado.
 6. **Remove todos os outros links da mensagem** (linktr.ee, `t.me` de concorrentes...) — só o seu permanece.
 7. **Remove linhas promocionais de outros grupos/canais** ("compartilhe", "participe do canal"...) mantendo título, preço, cupom e forma de pagamento.
-8. Busca a **imagem**: usa a foto da mensagem ou, na falta dela, a `og:image`/`twitter:image` da página da loja. Fontes em `FONTES_FOTO_SOMENTE_SITE` (ex.: grupo Promobit) **ignoram a foto da mensagem** — a imagem sai sempre do site do produto.
+8. Busca a **imagem** em cascata — nenhuma oferta sai sem foto:
+
+   | Nível | Fonte | Quando entra |
+   |---|---|---|
+   | 1 | Foto da **mensagem** do grupo de escuta | Padrão. Fontes em `FONTES_FOTO_SOMENTE_SITE` (ex.: grupo Promobit) pulam este nível — a foto de lá é o card da marca, não o produto |
+   | 2 | `og:image` / JSON-LD da **página do produto** | Foto ausente ou grupo Promobit. Consulta primeiro a URL **canônica** (o que o provider resolveu) e cai para a original; em 404 tenta a canônica automaticamente |
+   | 2.5 | **API oficial da loja** e **galeria** da página | Só se o nível 2 falhar. `loja:api-imagem` = API (Shopee); `site:galeria` = imagens da própria página (Mercado Livre, Magalu) |
+   | 3 | Placeholder "Confira o Produto no Link" | Último recurso. Garante que a oferta **nunca** saia sem foto |
+
+   A origem da foto é gravada em `fila_envio.origem_foto` e aparece no `npm run status` — é o jeito rápido de ver se a cascata está saudável.
 9. Adiciona o rodapé com o convite do **seu** grupo (`MEU_GRUPO_LINK`).
 10. Entra na fila anti-ban (ritmo por horário + limite diário) e publica no seu grupo.
 

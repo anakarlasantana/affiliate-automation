@@ -95,6 +95,26 @@ export function contarEnviosHoje() {
   return stmtContaHoje.get(inicioDoDiaOperacional()).total;
 }
 
+/**
+ * De ONDE veio a foto das ofertas já enfileiradas (cascata de imagem).
+ *
+ * Serve para enxergar a saúde da cascata sem abrir o log: quando o contador
+ * de `placeholder` cresce, a oferta saiu SEM foto real e vale investigar a
+ * loja/URL. `site:galeria` e `loja:api-imagem` são o Nível 2.5.
+ * @returns {{origem: string, total: number}[]} mais frequente primeiro
+ */
+export function contarOrigemDasFotos() {
+  return db
+    .prepare(
+      `SELECT origem_foto AS origem, COUNT(*) AS total
+         FROM fila_envio
+        WHERE origem_foto IS NOT NULL AND origem_foto <> ''
+        GROUP BY origem_foto
+        ORDER BY total DESC`
+    )
+    .all();
+}
+
 /* ================= Fila persistente de envios ================= */
 
 const stmtFilaInsere = db.prepare(

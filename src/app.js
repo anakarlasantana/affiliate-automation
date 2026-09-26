@@ -33,7 +33,10 @@ import {
   desembrulharVerificacaoMeli,
   desembrulharAfiliadoRedirecionador,
   extrairImagemProduto,
+  extrairImagemDaLoja,
+  extrairImagemDeUrl,
 } from "./linkResolver.js";
+import { imagemPelaApiDaLoja } from "./lojaApi.js";
 import {
   baixarMidiaComRetry,
   placeholderPara,
@@ -88,6 +91,26 @@ const CANDIDATOS_CHROME = [
  */
 
 /* ================= Pipeline de ofertas ================= */
+
+/**
+ * URL sem query string nem hash — o tracking de afiliado (matt_* etc.) não
+ * ajuda a buscar a foto e, no Mercado Livre, a query com `searchVariation`
+ * aponta para uma página que devolve 404. A URL "crua" é a que o site da
+ * loja serve de fato.
+ * @param {string} url
+ * @returns {string|null}
+ */
+function semQuery(url) {
+  if (!url) return null;
+  try {
+    const v = new URL(url);
+    v.search = "";
+    v.hash = "";
+    return v.toString();
+  } catch {
+    return null;
+  }
+}
 
 async function processarOferta(
   textoOriginal,
@@ -288,33 +311,79 @@ async function processarOferta(
       }
     }
     if (!imagemBase64) {
-      try {
-        // urlLimpa (escopo da funcao), nao urlTentativa (escopo do loop):
-        // antes, mensagem SEM foto quebrava aqui com ReferenceError e a
-        // oferta inteira era perdida.
-        const doSite = await extrairImagemProduto(urlLimpa);
+      // NÍVEL 2: foto do produto na página da LOJA AFILIADA.
+      //
+      // BUG CORRIGIDO (26/09/2026): antes consultava só `urlLimpa`, que no
+      // Mercado Livre é a URL COM SLUG — que responde 404 (o ML tirou do ar).
+      // Como o provider já tinha resolvido a URL canônica (meuLink), era ela
+      // que devia ser consultada. Testado ao vivo: `www.../MLB-...-slug-_JM`
+      // -> 404 -> placeholder; `produto.mercadolivre.com.br/MLB-..._JM`
+      // -> og:image de 42 KB. O retry de 404 dentro do linkResolver cobre o
+      // resto dos casos por link.
+      const candidatas = [];
+      const canonica = semQuery(meuLink);
+      if (canonica) candidatas.push({ url: canonica, rotulo: "canônica" });
+      if (urlLimpa && urlLimpa !== canonica) {
+        candidatas.push({ url: urlLimpa, rotulo: "original" });
+      }
+
+      for (const { url, rotulo } of candidatas) {
+        try {
+          const doSite = await extrairImagemProduto(url);
+          if (doSite?.base64) {
+            const v = validarImagemBase64(doSite.base64);
+            if (v.valido) {
+              imagemBase64 = doSite.base64;
+              origemFoto = doSite.origem || "site";
+              console.log(
+                `   🖼️  Foto do produto [${origemFoto}] obtida do site (${v.kb} KB, URL ${rotulo}).`,
+              );
+              break;
+            }
+            console.warn(
+              `   ⚠️  Foto do site invalida (${v.motivo}) — tentando outro endereço.`,
+            );
+          }
+        } catch (e) {
+          console.warn(
+            `   ⚠️  Erro ao buscar foto do produto (${url}): ${textoErro(e)}.`,
+          );
+        }
+      }
+    }
+    if (!imagemBase64) {
+      // NÍVEL 2.5: (a) API oficial da loja, (b) galeria da página. Entram
+      // depois do nível 2 porque são mais caras (rede/autenticação) e porque
+      // o og:image, quando existe, é a foto certa. A galeria é a única fonte
+      // possível no Mercado Livre: a API oficial responde 403 sem token.
+      const chave = chaveProduto(urlLimpa) || chaveProduto(meuLink || "");
+      const viaApi = chave
+        ? await imagemPelaApiDaLoja(loja, chave)
+        : null;
+      const candidatas = [];
+      if (viaApi) candidatas.push({ url: viaApi, rotulo: "API oficial" });
+      const canonica = semQuery(meuLink);
+      if (canonica) candidatas.push({ url: canonica, rotulo: "galeria" });
+      if (urlLimpa && urlLimpa !== canonica) {
+        candidatas.push({ url: urlLimpa, rotulo: "galeria" });
+      }
+
+      for (const { url, rotulo } of candidatas) {
+        // A URL da API é só o arquivo: a "galeria" só faz sentido para página.
+        const doSite = rotulo === "API oficial"
+          ? await extrairImagemDeUrl(url)
+          : await extrairImagemDaLoja(url);
         if (doSite?.base64) {
           const v = validarImagemBase64(doSite.base64);
           if (v.valido) {
             imagemBase64 = doSite.base64;
             origemFoto = doSite.origem || "site";
             console.log(
-              `   🖼️  Foto do produto obtida do site (${v.kb} KB, ${v.mime}, via ${origemFoto})`,
+              `   🖼️  Foto [${origemFoto}] via ${rotulo} (${v.kb} KB).`,
             );
-          } else {
-            console.warn(
-              `   ⚠️  Foto do site invalida (${v.motivo}) — usando placeholder.`,
-            );
+            break;
           }
-        } else {
-          console.log(
-            `   🖼️  Site sem foto util (${urlLimpa}) — usando placeholder da loja.`,
-          );
         }
-      } catch (e) {
-        console.warn(
-          `   ⚠️  Erro ao buscar foto do produto: ${textoErro(e)} — usando placeholder.`,
-        );
       }
     }
     if (!imagemBase64) {

@@ -87,6 +87,24 @@ Legenda: ✅ validado · ⚠️ lacuna conhecida (adiada — loja não configura
 - **Tratamento no código**: `expandirLink` itera até `MAX_SALTOS_EXPANSAO` (4) saltos com guarda de loop; `extrairRedirectJS` casa o padrão `l = '...'` (fixture real em `test/fixtures/promoby-redirect.html`) com fallback no âncora "clique aqui". Depois disso o fluxo é o MESMO dos outros grupos (mergulhador → `chaveProduto` → sanitização genérica).
 - **Imagem**: a foto que vem na mensagem é o card da marca — a variável `FONTES_FOTO_SOMENTE_SITE` (`.env`) faz a cascata pular o nível 1 e ir direto na `og:image` do site do produto (nível 2), com placeholder como último recurso.
 
+## Fontes de imagem por loja (medido ao vivo em 26/09/2026)
+
+> Medido ao vivo contra as páginas/APIs reais. Vale revalidar antes de
+> confiar: lojas mudam de CDN e de API sem avisar.
+
+| Loja | API oficial de imagem? | Fonte que o app usa |
+|---|---|---|
+| Shopee | **SIM** — GraphQL `productOfferV2(itemId:)` autenticado (`SHOPEE_APP_ID`/`SHOPEE_SECRET`), devolve `imageUrl`. Medido: 1024x1024, 146 KB | `loja:api-imagem` |
+| Mercado Livre | **NÃO** — `api.mercadolibre.com/items/MLB...` responde **403** sem token | galeria da página (`site:galeria`) + `og:image` |
+| Magalu | **NÃO** | galeria da página + `og:image` **com upgrade de resolução** |
+
+Duas descobertas que mudaram a implementação:
+
+- **Mercado Livre descontinuou a página com slug.** `www.mercadolivre.com.br/MLB-<id>-<slug>-_JM` responde **404**; a canônica `produto.mercadolivre.com.br/MLB-<id>-_JM` responde 200. Era essa URL que a cascata consultava, e por isso tanta oferta caía no placeholder. Hoje ela tenta a canônica primeiro e, em 404, deriva a canônica sozinha.
+- **Magalu codifica o tamanho da imagem no caminho** (`a-static.mlcdn.com.br/470x352/...`) e o `og:image` aponta para a **miniatura** (467x352, 16 KB). Reescrevendo o segmento, o mesmo arquivo vem em resolução cheia: `1280x1280` → 1280x965, 114 KB.
+
+Nada de vídeo: nenhuma dessas lojas expõe vídeo baixável (o HTML do ML não tem um único `.mp4`; a API da Shopee não tem campo de vídeo).
+
 ## Lacunas adiadas para o futuro (TODOs)
 
 Condição de ativação: **preencher a credencial da loja no `.env`** → aplicar o ajuste correspondente antes de ligar a loja.
