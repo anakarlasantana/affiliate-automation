@@ -63,6 +63,20 @@ export function marcarDirectRespondido(mid, igsid) {
   return stmtDirectMarca.run(mid, igsid || null).changes > 0;
 }
 
+/**
+ * Mids respondidos nas últimas N horas — usado no boot do servidor para a
+ * idempotência sobreviver a um restart (a Meta reenvia webhook).
+ */
+export function listarDirectRespondidos(horas = 24) {
+  const janela = Math.max(1, Math.min(24 * 30, parseInt(horas, 10) || 24));
+  return db
+    .prepare(
+      `SELECT mid, igsid FROM direct_respondidos
+        WHERE respondido_em >= datetime('now', ?)`,
+    )
+    .all(`-${janela} hours`);
+}
+
 // Migração idempotente: `contabiliza` separa DEDUPLICAÇÃO (0) de ENVIO (1).
 
 // Antes, cada oferta gravava 2 linhas (URL limpa + chave do produto) e as duas

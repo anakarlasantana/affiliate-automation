@@ -72,6 +72,7 @@ export function criarServidor({
   respondidos = {},
   enviarDirect = async () => {},
   obterChaveAtual = () => null,
+  aoMarcar = () => {},
   avisar = () => {},
 } = {}) {
   const publicacao = config?.publicacao || {};
@@ -129,6 +130,7 @@ export function criarServidor({
     }
 
     const proximo = marcarRespondido(respondidosAtuais, evento.mid, evento.igsid);
+    aoMarcar(evento.mid, evento.igsid);
     enviarDirect({ igsid: evento.igsid, texto: montarResposta(link) }).catch((erro) =>
       avisar(`Direct: falha ao enviar (${erro.message})`),
     );
@@ -226,13 +228,33 @@ export function criarServidor({
 
 // Executado direto (`npm run servidor`): sobe as três rotas públicas.
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  const porta = config.publicacao.porta;
-  criarServidor({ config }).listen(porta, () => {
-    console.log(`🌐 servidor em http://127.0.0.1:${porta}`);
-    console.log('   GET  /go/<chave>  ·  GET /midia/<arquivo>  ·  POST /webhooks/instagram');
-    if (!config.publicacao.baseUrl) {
-      console.log('   ⚠️  PUBLIC_BASE_URL vazio — a Meta não conseguirá baixar a mídia');
+  (async () => {
+    // Import dinâmico: os testes não tocam no SQLite (better-sqlite3 nativo).
+    const { listarDirectRespondidos, marcarDirectRespondido } = await import('./database.js');
+
+    // Idempotência sobrevive ao restart: a Meta reenvia webhook.
+    const respondidos = {};
+    for (const { mid, igsid } of listarDirectRespondidos(24)) {
+      respondidos[mid] = { igsid, quando: Date.now() };
     }
+
+    const porta = config.publicacao.porta;
+
+    criarServidor({
+      config,
+      respondidos,
+      aoMarcar: (mid, igsid) => marcarDirectRespondido(mid, igsid),
+    }).listen(porta, () => {
+      console.log(`🌐 servidor em http://127.0.0.1:${porta}`);
+      console.log('   GET  /go/<chave>  ·  GET /midia/<arquivo>  ·  POST /webhooks/instagram');
+      console.log(`   Direct: ${Object.keys(respondidos).length} mensagem(ns) já respondida(s) nas últimas 24h`);
+      if (!config.publicacao.baseUrl) {
+        console.log('   ⚠️  PUBLIC_BASE_URL vazio — a Meta não conseguirá baixar a mídia');
+      }
+    });
+  })().catch((erro) => {
+    console.error(`💥 servidor não subiu: ${erro.message}`);
+    process.exit(1);
   });
 }
 
