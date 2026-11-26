@@ -54,9 +54,27 @@ outro módulo deve chamar o cliente do WhatsApp.
 - **Ambiente ≠ código.** Nenhuma credencial ou fuso hardcoded: tudo em
   `src/config.js` a partir do `.env`.
 
+## Canais e mídia (FEAT-003 a FEAT-006)
+
+Módulos de lógica **pura** criados com as specs de Instagram (sem rede, sem token):
+
+| Arquivo | Responsabilidade |
+| :--- | :--- |
+| `src/midia/preco.js` | extrai preço/desconto do texto ouvido e escolhe entre API e texto |
+| `src/midia/quadro.js` | enquadramento 9:16 (cover), decisão PNG/WebP→JPEG, nome com hash |
+| `src/redirecionador.js` | `/go/<chave>` → destino https + contagem de clique |
+| `src/canais/base.js` | contrato `CanalPublisher` + `decidirPublicacao()` (kill switch, preço, quota, dedup, limite) |
+| `src/canais/direct.js` | assinatura do webhook, leitura do evento, janela de 24 h, texto da DM |
+| `src/canais/reels.js` | formato (carrossel/zoom), argv do ffmpeg 9:16 e payloads REELS/CAROUSEL |
+
+O que **ainda é tarefa** (depende de credencial/dependência externa): `src/midia/compor.js`
+(`sharp`), `src/midia/video.js` (`ffmpeg`), `src/servidor.js` (rotas `/midia` e `/go`),
+`src/canais/instagram.js` (Graph API) e `scripts/verificar-ig.mjs`.
+
 ## Verificação
 
 `npm run check` (sintaxe de todos os arquivos) + `npm test` (`node --test`).
 Testes cobrem `linkResolver` e `imagem`, que são justamente os módulos com
 parsing frágil. `src/affiliates/*` não tem teste unitário hoje — mudança de
 provider deve ser validada com uma url real e o `npm run doctor`.
+
