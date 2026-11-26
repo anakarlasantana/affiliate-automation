@@ -66,7 +66,11 @@ Não há lint nem build: o projeto é Node >=18, ESM puro, roda direto de `src/`
 ```bash
 npm run verify         # check + test (é o que `ai verify ready` executa)
 npm run verify:links   # abre os links reais na loja: produto + nosso rastreio
+npm run verify:ig      # READ-ONLY: token, conta profissional e quota do Instagram
+npm run verify:api     # os dois acima (é o que `ai verify api` executa)
+npm run servidor       # sobe /go/<chave>, /midia/<arquivo> e o webhook do Direct
 ```
+
 
 `npm run verify:links` depende de rede (é o `ai verify api` do harness): usa
 `test/fixtures/links-ouvidos.json` e reporta PASS/FAIL/SKIP por link **e a

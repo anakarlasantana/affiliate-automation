@@ -17,6 +17,13 @@ import {
   nomeDaMidia,
   precisaJpeg,
 } from '../src/midia/quadro.js';
+import {
+  CTAS,
+  escaparDrawtext,
+  montarArgsStory,
+  precoCurto,
+  textosDoStory,
+} from '../src/midia/compor.js';
 
 /* ---------------- CA-3: preço no texto ouvido ---------------- */
 
@@ -99,4 +106,55 @@ test('nome da mídia é o hash do conteúdo e sempre .jpg', () => {
   assert.equal(a, b, 'mesmo conteúdo, mesmo nome (idempotente)');
   assert.notEqual(a, c);
   assert.match(a, /^[0-9a-f]{40}\.jpg$/);
+});
+
+/* ---------------- CA-1: criativo do story (composição) ---------------- */
+
+test('preço curto mantém centavos só quando existem', () => {
+  assert.equal(precoCurto(199), 'R$ 199');
+  assert.equal(precoCurto(1700), 'R$ 1.700');
+  assert.equal(precoCurto(199.9), 'R$ 199,90');
+  assert.equal(precoCurto(Number.NaN), null);
+});
+
+test('textos do story exigem preço e montam o "de/por"', () => {
+  assert.equal(textosDoStory(null), null, 'sem preço não há story');
+
+  const textos = textosDoStory({ atual: 199, antigo: 299, desconto: 33 }, 'grupo');
+  assert.equal(textos.preco, 'R$ 199');
+  assert.equal(textos.de, 'de R$ 299 (-33%)');
+  assert.equal(textos.principal, CTAS.grupo.principal);
+  assert.equal(textos.apoio, 'link na bio');
+});
+
+test('CTA muda com o destino configurado (grupo x oferta)', () => {
+  const preco = { atual: 99, antigo: null, desconto: null };
+  assert.equal(textosDoStory(preco, 'oferta').principal, CTAS.oferta.principal);
+  assert.equal(textosDoStory(preco, 'destino-invalido').principal, CTAS.grupo.principal);
+});
+
+test('argv do story monta 9:16 com faixa de preço e CTA', () => {
+  const textos = textosDoStory({ atual: 199, antigo: 299, desconto: 33 }, 'grupo');
+  const args = montarArgsStory({ entrada: 'foto.jpg', saida: 'story.jpg', textos });
+  const linha = args.join(' ');
+
+  assert.ok(linha.includes(`scale=${LARGURA_STORY}:${ALTURA_STORY}`), 'escala 9:16');
+  assert.ok(linha.includes('force_original_aspect_ratio=increase'), 'sem distorcer');
+  assert.ok(linha.includes(`crop=${LARGURA_STORY}:${ALTURA_STORY}`), 'enquadramento cover');
+  assert.ok(linha.includes('drawbox='), 'faixa de preço');
+  assert.ok(linha.includes('R$ 199'), 'preço no criativo');
+  assert.ok(linha.includes('de R$ 299'), '"de" preservado');
+  assert.ok(args.includes('-frames:v'), 'saída é imagem única');
+  assert.equal(args.at(-1), 'story.jpg');
+});
+
+test('composição recusa entrada/saída/preço ausentes', () => {
+  const textos = textosDoStory({ atual: 10 }, 'grupo');
+  assert.throws(() => montarArgsStory({ saida: 'x.jpg', textos }));
+  assert.throws(() => montarArgsStory({ entrada: 'a.jpg', textos }));
+  assert.throws(() => montarArgsStory({ entrada: 'a.jpg', saida: 'x.jpg' }));
+});
+
+test('escape do drawtext protege separadores do filtro', () => {
+  assert.equal(escaparDrawtext("a:b,c%d'e"), "a\\:b\\,c\\%d\\'e");
 });

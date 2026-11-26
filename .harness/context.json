@@ -55,7 +55,7 @@
     // conversão) e abre o link final na loja para conferir produto + rastreio.
     // Fica fora do readiness de propósito: depende de rede de terceiros.
     "api": {
-      "command": "npm run verify:links",
+      "command": "npm run verify:api",
       "timeoutMs": 300000
     }
   }

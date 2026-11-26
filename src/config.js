@@ -262,6 +262,39 @@ const config = {
       })
       .filter(Boolean),
   },
+  /**
+   * Publicação em canais externos (Instagram). Tudo desligado por padrão:
+   * `PUBLICAR_STORIES=0` é o kill switch e a conta só entra quando o token
+   * existir. Nada de segredo em código (FEAT-004).
+   */
+  publicacao: {
+    /** URL pública que a Meta usa para baixar a mídia (sem ela, não publica) */
+    baseUrl: (process.env.PUBLIC_BASE_URL || '').replace(/\/+$/, ''),
+    /** Base do link curto que vai na bio/Direct */
+    goBaseUrl: (process.env.GO_BASE_URL || '').replace(/\/+$/, ''),
+    /** Para onde o link curto aponta por padrão: grupo | oferta */
+    goDestino: (process.env.GO_DESTINO || 'grupo').toLowerCase(),
+    /** Onde as mídias compostas são servidas */
+    midiaDir: process.env.MIDIA_DIR || path.join(DATA_DIR, 'midia'),
+    maxStoriesDia: parseInt(process.env.MAX_STORIES_DIA || '5', 10),
+    maxReelsDia: parseInt(process.env.MAX_REELS_DIA || '1', 10),
+    /** Resposta automática no Direct (FEAT-005) */
+    diretoAtivo: /^(1|true|sim|on)$/i.test(process.env.DIRETO_ATIVO || ''),
+    palavraDireto: (process.env.DIRECT_PALAVRA || 'LINK').trim(),
+    /** Porta do servidor de mídia/redirecionador/webhook */
+    porta: parseInt(process.env.PORT || '3000', 10),
+  },
+  instagram: {
+    /** ID numérico da conta profissional (não é o @handle) */
+    userId: process.env.IG_USER_ID || '',
+    /** Token de longa duração (System User = não expira) */
+    token: process.env.IG_ACCESS_TOKEN || '',
+    /** Segredo do app — só para validar a assinatura do webhook */
+    appSecret: process.env.IG_APP_SECRET || '',
+    graphVersion: process.env.IG_GRAPH_VERSION || 'v21.0',
+    /** Kill switch da publicação de story (default: desligado) */
+    publicarStories: /^(1|true|sim|on)$/i.test(process.env.PUBLICAR_STORIES || ''),
+  },
 };
 
 validarObrigatorias([

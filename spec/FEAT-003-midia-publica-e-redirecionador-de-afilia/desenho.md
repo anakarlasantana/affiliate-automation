@@ -28,7 +28,7 @@ oferta aprovada (FEAT-001/002)
 | :--- | :--- | :--- |
 | `src/midia/preco.js` | **novo** | parser de preço (puro, testável) |
 | `src/midia/quadro.js` | **novo** | enquadramento 9:16 + decisão de JPEG (puro) |
-| `src/midia/compor.js` | novo (tarefa) | usa `sharp` para gerar o JPEG final |
+| `src/midia/compor.js` | **novo** | gera o JPEG pelo **ffmpeg** (mesmo binário do Reels, nenhuma dependência npm nativa) |
 | `src/redirecionador.js` | **novo** | destino + contagem de cliques (puro) |
 | `src/servidor.js` | novo (tarefa) | `GET /midia/:nome` e `GET /go/:chave` |
 | `src/config.js` + `.env.example` | sim | `PUBLIC_BASE_URL`, `GO_BASE_URL`, `GO_DESTINO`, `MIDIA_DIR` |
@@ -50,7 +50,8 @@ provada por unit.
 
 ## Riscos
 
-1. `sharp` é dependência nativa nova — precisa justificar o trade-off no commit.
+1. A composição usa o **ffmpeg** (já exigido pela FEAT-006): **nenhuma dependência npm nova** entrou
+   no projeto — validado gerando story 1080×1920 JPEG e Reel H.264 6 s nesta sessão.
 2. Sem domínio público, CA-5 não tem como ser validado em produção (o teste unitário cobre a
    nomeação/hash, não o DNS).
 3. Preço da API da Shopee usa a assinatura que já existe; se a API cair, cai para o texto.

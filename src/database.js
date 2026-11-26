@@ -33,7 +33,38 @@ db.exec(`
   );
 `);
 
+/**
+ * Idempotência do Direct (FEAT-005): a Meta reenvia o webhook e ninguém pode
+ * receber a mesma DM duas vezes. Guarda só o mínimo (mid + igsid), sem o
+ * conteúdo da mensagem — retenção mínima por LGPD.
+ */
+db.exec(`
+  CREATE TABLE IF NOT EXISTS direct_respondidos (
+    mid TEXT PRIMARY KEY,
+    igsid TEXT,
+    respondido_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+  );
+`);
+
+const stmtDirectExiste = db.prepare('SELECT 1 FROM direct_respondidos WHERE mid = ? LIMIT 1');
+const stmtDirectMarca = db.prepare(
+  'INSERT OR IGNORE INTO direct_respondidos (mid, igsid) VALUES (?, ?)',
+);
+
+/** @param {string} mid id da mensagem do Instagram */
+export function directJaRespondido(mid) {
+  if (!mid) return false;
+  return Boolean(stmtDirectExiste.get(mid));
+}
+
+/** Marca a mensagem como respondida (idempotente). */
+export function marcarDirectRespondido(mid, igsid) {
+  if (!mid) return false;
+  return stmtDirectMarca.run(mid, igsid || null).changes > 0;
+}
+
 // Migração idempotente: `contabiliza` separa DEDUPLICAÇÃO (0) de ENVIO (1).
+
 // Antes, cada oferta gravava 2 linhas (URL limpa + chave do produto) e as duas
 // contavam no limite diário — o MAX_ENVIOS_DIA valia pela metade.
 const colunasOfertas = db.prepare('PRAGMA table_info(ofertas_enviadas)').all();

@@ -67,9 +67,21 @@ Módulos de lógica **pura** criados com as specs de Instagram (sem rede, sem to
 | `src/canais/direct.js` | assinatura do webhook, leitura do evento, janela de 24 h, texto da DM |
 | `src/canais/reels.js` | formato (carrossel/zoom), argv do ffmpeg 9:16 e payloads REELS/CAROUSEL |
 
-O que **ainda é tarefa** (depende de credencial/dependência externa): `src/midia/compor.js`
-(`sharp`), `src/midia/video.js` (`ffmpeg`), `src/servidor.js` (rotas `/midia` e `/go`),
-`src/canais/instagram.js` (Graph API) e `scripts/verificar-ig.mjs`.
+**Implementado** (sem credencial, coberto por `node --test`):
+
+| Arquivo | Faz |
+| :--- | :--- |
+| `src/midia/compor.js` | story 1080×1920 JPEG com faixa de preço e CTA (ffmpeg) |
+| `src/midia/video.js` | Reel H.264 9:16 a partir das fotos (ffmpeg) |
+| `src/servidor.js` | `GET /go/<chave>`, `GET /midia/<arquivo>`, `POST /webhooks/instagram` |
+| `src/canais/instagram.js` | Graph API: container → `media_publish`, quota |
+| `src/canais/index.js` | registry de canais (`InstagramStory`) |
+| `scripts/verificar-ig.mjs` | checagem read-only de token/quota (`npm run verify:ig`) |
+
+**Ainda depende de credencial/infra** (não testável offline): publicar de verdade no Instagram
+(`IG_USER_ID` + `IG_ACCESS_TOKEN` e domínio público), validar a galeria do Mercado Livre (OAuth) e
+colocar HTTPS na frente do `npm run servidor` (Caddy/nginx).
+
 
 ## Verificação
 

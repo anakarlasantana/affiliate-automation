@@ -6,13 +6,16 @@
   "main": "src/app.js",
   "scripts": {
     "start": "node src/app.js",
-    "check": "for f in src/*.js src/affiliates/*.js; do node --check $f; done",
+    "servidor": "node src/servidor.js",
+    "check": "for f in src/*.js src/affiliates/*.js src/canais/*.js src/midia/*.js scripts/*.mjs; do node --check $f; done",
     "verify": "npm run check && npm test",
+    "verify:links": "node scripts/verificar-links.mjs",
+    "verify:ig": "node scripts/verificar-ig.mjs",
+    "verify:api": "npm run verify:links && npm run verify:ig",
     "status": "node src/status.js",
     "doctor": "node src/app.js --doctor",
     "diag:midia": "node src/app.js --diag-midia",
     "test": "node --test",
-    "verify:links": "node scripts/verificar-links.mjs",
     "reset-sessao": "rm -rf tokens"
   },
   "dependencies": {
