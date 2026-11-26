@@ -232,5 +232,30 @@ docs/                 # documentação (pesquisa de links por loja, etc.)
 tokens/               # sessão do Chrome/WhatsApp (login do wppconnect)
 ```
 
+## Trabalhando no projeto com agentes de IA (ai-harness)
+
+O repositório publica o próprio contexto para o
+[`ai-harness`](https://github.com/anakarlasantana/ai-harness):
+
+- [`AGENTS.md`](AGENTS.md) — regras invioláveis, comandos de prontidão e mapa
+  "onde olhar". É o arquivo que o harness injeta no System Prompt e que Cline,
+  Codex e Claude também leem.
+- [`.harness/context.json`](.harness/context.json) — provider, amostragem por
+  etapa, comandos e `verification.readiness` (`npm run check && npm test`).
+- `docs/harness/` — [arquitetura](docs/harness/arquitetura.md),
+  [contrato do provider](docs/harness/contrato-provider.md) e
+  [receitas](docs/harness/receitas.md).
+
+Na raiz deste repositório (depois de instalar o harness com `npm link`):
+
+```bash
+ai plan create <specId>                    # desenho + tarefas
+ai build code <taskId> "..." --spec <ID>   # implementação
+ai verify ready                            # roda npm run check && npm test
+ai ops dashboard                           # painel local das execuções
+```
+
+Artefatos de execução (`.harness/tasks/`, `tests/`, `rework/`) ficam fora do git.
+
 ## Aviso
 O envio automatizado no WhatsApp viola os Termos de Serviço do WhatsApp. Use conta secundária e por sua conta e risco.

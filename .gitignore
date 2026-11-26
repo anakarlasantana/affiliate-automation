@@ -3,3 +3,10 @@ node_modules/
 tokens/
 data/
 *.log
+
+# ai-harness: artefatos de execução (efêmeros, regenerados a cada run).
+# O que entra no git é só .harness/context.json — o contexto do repositório.
+.harness/tasks/
+.harness/tests/
+.harness/rework/
+.harness/context/repo-map.md

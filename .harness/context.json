@@ -1,0 +1,67 @@
+{
+  // =========================================================================
+  // Contexto do ai-harness para o affiliate-automation.
+  // Lido pelo CLI `ai` na raiz deste repositório. Contrato completo em
+  // ai-harness/docs/verificacao-e-testes.md (seção "Onboarding de um alvo novo").
+  // =========================================================================
+
+  // "auto" = herda HARNESS_PROVIDER / endpoint do .env do harness.
+  // Fixe ("openai" | "claude" | "kiro") só se este repositório exigir um
+  // provedor específico, independente do ambiente.
+  "provider": "auto",
+
+  // ---------- Modelos ----------
+  // `models` e `defaultModel` ficam de fora DE PROPÓSITO: o modelo vem de
+  // HARNESS_MODEL no .env do harness. Declarar aqui um nome que o endpoint não
+  // conhece faz a task falhar (RetryPolicy trata 404 como erro acionável).
+  //
+  // Para gastar modelo forte só onde o raciocínio importa, acrescente:
+  //   "models": { "plan": "<modelo-forte>", "review": "<modelo-forte>",
+  //               "rework": "<modelo-forte>" },
+  //   "defaultModel": "<modelo-barato>"
+
+  // ---------- Amostragem por etapa ----------
+  // Verificação, revisão e sincronização têm de ser determinísticas.
+  "stages": {
+    "qa": { "temperature": 0 },
+    "review": { "temperature": 0 },
+    "sync": { "temperature": 0 }
+  },
+
+  // ---------- Regras de arquitetura ----------
+  // Não declaradas aqui: as regras duráveis vivem em AGENTS.md, que o harness
+  // anexa ao System Prompt de todas as etapas (LocalContextLoader: fallback
+  // para AGENTS.md). Uma regra, um arquivo — o harness não duplica.
+
+  // ---------- Comandos ----------
+  // Não há ESLint neste projeto: `npm run check` é o portão estático
+  // (node --check arquivo por arquivo). Não há etapa de build (buildCommand
+  // omitido de propósito) — o app roda direto de src/.
+  "lintCommand": "npm run check",
+  "testCommand": "npm test",
+
+  // ---------- Prontidão (definition of done em UM comando) ----------
+  // Lido por `ai verify ready`; tem precedência sobre testCommand.
+  // Ambos os comandos já existem no package.json.
+  "verification": {
+    "readiness": {
+      "command": "npm run check && npm test",
+      "timeoutMs": 180000
+    }
+  }
+
+  // ---------- e2e: omitido DE PROPÓSITO ----------
+  // O app é um bot de longa duração (WhatsApp via wppconnect com sessão por QR,
+  // Telegram por StringSession) que publica em grupo real. Não existe jornada
+  // ponta-a-ponta que rode em CI sem violar a regra "nunca publicar link que
+  // não seja o nosso rastreio".
+  //
+  // A verificação é unitária (node --test):
+  //   test/linkResolver.test.js — expansão de encurtadores, redirect por JS,
+  //                               sanitização, dedup por produto
+  //   test/imagem.test.js       — cascata de imagem, dimensões, placeholder
+  //
+  // Se um dia houver jornada isolável (ex.: processar fixture e escrever o
+  // resultado em arquivo, sem enviar), declare aqui:
+  //   "e2e": { "command": "...", "timeoutMs": 600000 }
+}
