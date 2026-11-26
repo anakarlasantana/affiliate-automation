@@ -21,7 +21,13 @@ function configDeTeste(midiaDir) {
   return {
     publicacao: { goDestino: 'grupo', midiaDir, palavraDireto: 'LINK' },
     whatsapp: { meuGrupoLink: GRUPO },
-    instagram: { appSecret: SEGREDO, userId: '1784', token: 'token', graphVersion: 'v21.0' },
+    instagram: {
+      appSecret: SEGREDO,
+      verifyToken: 'verifica-123',
+      userId: '1784',
+      token: 'token',
+      graphVersion: 'v21.0',
+    },
   };
 }
 
@@ -99,6 +105,29 @@ test('health responde 200', async () => {
     const r = await pedir(porta, { caminho: '/health' });
     assert.equal(r.status, 200);
     assert.equal(JSON.parse(r.corpo).ok, true);
+  });
+});
+
+test('handshake do webhook recusa verify_token errado (CA-1)', async () => {
+  await comServidor(async ({ porta }) => {
+    const r = await pedir(porta, {
+      caminho: '/webhooks/instagram?hub.mode=subscribe&hub.verify_token=errado&hub.challenge=desafio-42',
+    });
+
+    assert.equal(r.status, 403);
+    assert.ok(!r.corpo.includes('desafio-42'), 'não devolve o challenge');
+  });
+});
+
+test('handshake do webhook devolve o challenge com o token certo (CA-2)', async () => {
+  await comServidor(async ({ porta }) => {
+    const r = await pedir(porta, {
+      caminho:
+        '/webhooks/instagram?hub.mode=subscribe&hub.verify_token=verifica-123&hub.challenge=desafio-42',
+    });
+
+    assert.equal(r.status, 200);
+    assert.equal(r.corpo, 'desafio-42');
   });
 });
 

@@ -77,6 +77,8 @@ Módulos de lógica **pura** criados com as specs de Instagram (sem rede, sem to
 | `src/canais/instagram.js` | Graph API: container → `media_publish`, quota |
 | `src/canais/index.js` | registry de canais (`InstagramStory`) |
 | `scripts/verificar-ig.mjs` | checagem read-only de token/quota (`npm run verify:ig`) |
+| `src/midia/acervo.js` | índice `chave → arquivo/link/preço` (`data/midia/acervo.json`) |
+| `src/canais/publicacao.js` | guardas de publicação + legenda + quota → `npm run publicar` |
 
 **Ainda depende de credencial/infra** (não testável offline): publicar de verdade no Instagram
 (`IG_USER_ID` + `IG_ACCESS_TOKEN` e domínio público), validar a galeria do Mercado Livre (OAuth) e

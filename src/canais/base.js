@@ -34,6 +34,7 @@ export class CanalPublisher {
 /** Motivos de descarte — strings estáveis, usadas em log e no `status`. */
 export const MOTIVOS = {
   DESLIGADO: 'desligado',
+  SEM_CREDENCIAL: 'sem-credencial',
   SEM_PRECO: 'sem-preco',
   DUPLICADO: 'ja-publicado',
   QUOTA: 'quota-esgotada',
@@ -49,6 +50,7 @@ export const MOTIVOS = {
  */
 export function decidirPublicacao({
   killSwitch,
+  temCredencial,
   preco,
   quotaUsada,
   quotaTotal,
@@ -57,6 +59,9 @@ export function decidirPublicacao({
   limiteDia,
 } = {}) {
   if (!killSwitch) return { publicar: false, motivo: MOTIVOS.DESLIGADO };
+
+  // `undefined` = não checado (mantém compatível com quem não passa credencial).
+  if (temCredencial === false) return { publicar: false, motivo: MOTIVOS.SEM_CREDENCIAL };
 
   if (!preco || !Number.isFinite(preco.atual) || preco.atual <= 0) {
     return { publicar: false, motivo: MOTIVOS.SEM_PRECO };

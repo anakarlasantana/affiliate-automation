@@ -23,8 +23,11 @@ export class InstagramStory extends CanalPublisher {
    * Devolve `{ publicado, motivo, mediaId? }` — nunca lança por regra de negócio.
    */
   async publicar(dados = {}, deps = {}) {
+    const credenciaisFaltantes = this.constructor.credenciaisFaltantes();
+
     const decisao = decidirPublicacao({
       killSwitch: config.instagram.publicarStories,
+      temCredencial: credenciaisFaltantes.length === 0,
       preco: dados.preco,
       quotaUsada: dados.quotaUsada,
       quotaTotal: dados.quotaTotal,
@@ -33,10 +36,8 @@ export class InstagramStory extends CanalPublisher {
       limiteDia: config.publicacao.maxStoriesDia,
     });
 
-    if (!decisao.publicar) return { publicado: false, motivo: decisao.motivo };
-
-    if (!this.constructor.estaConfigurado()) {
-      return { publicado: false, motivo: MOTIVOS.DESLIGADO, faltantes: this.constructor.credenciaisFaltantes() };
+    if (!decisao.publicar) {
+      return { publicado: false, motivo: decisao.motivo, faltantes: credenciaisFaltantes };
     }
 
     const mediaId = await publicarStory(config.instagram, dados, deps);

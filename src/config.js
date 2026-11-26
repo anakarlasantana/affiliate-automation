@@ -291,6 +291,8 @@ const config = {
     token: process.env.IG_ACCESS_TOKEN || '',
     /** Segredo do app — só para validar a assinatura do webhook */
     appSecret: process.env.IG_APP_SECRET || '',
+    /** Token do handshake do webhook (`hub.verify_token`) */
+    verifyToken: process.env.IG_VERIFY_TOKEN || '',
     graphVersion: process.env.IG_GRAPH_VERSION || 'v21.0',
     /** Kill switch da publicação de story (default: desligado) */
     publicarStories: /^(1|true|sim|on)$/i.test(process.env.PUBLICAR_STORIES || ''),

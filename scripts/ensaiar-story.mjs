@@ -30,6 +30,7 @@ import {
 import { comporStory, textosDoStory } from '../src/midia/compor.js';
 import { nomeDaMidia } from '../src/midia/quadro.js';
 import { registrarDestino } from '../src/redirecionador.js';
+import { registrarNoAcervo } from '../src/midia/acervo.js';
 
 const args = process.argv.slice(2);
 const url = args.find((a) => /^https?:\/\//.test(a));
@@ -111,10 +112,20 @@ const curto = `${(config.publicacao.goBaseUrl || base).replace(/\/+$/, '')}/go/$
 const arquivoDestinos = path.join(config.caminhos.data, 'go-destinos.json');
 registrarDestino(arquivoDestinos, chaveUrl, conv.meuLink);
 
+// Guarda a mídia no acervo: o nome do arquivo é hash, então o CLI de publicação
+// não teria como saber de qual oferta ele é.
+const acervo = registrarNoAcervo(pasta, chaveUrl, {
+  arquivo: nomeSaida,
+  link: conv.meuLink,
+  preco: precoNum,
+  titulo: '',
+});
+
 console.log(`imagem     : ${imagem.origem} (${Math.round(buffer.length / 1024)} KB)`);
 console.log(`story gerado: ${saida}`);
 console.log(`URL p/ Meta : ${base}/midia/${nomeSaida}`);
 console.log(`link curto  : ${curto}`);
 console.log(`destino     : registrado em ${arquivoDestinos}`);
+console.log(`acervo      : ${Object.keys(acervo).length} chave(s) em ${pasta}/acervo.json`);
 console.log(`textos      : ${textos.preco}${textos.de ? ` · ${textos.de}` : ''} · ${textos.principal} · ${textos.apoio}`);
 console.log('\nConfira a imagem e, se estiver boa, o story está pronto para o deploy.\n');

@@ -139,14 +139,23 @@ export function criarServidor({
   }
 
   function tratarWebhook(req, res, url) {
-    // Handshake de verificação do webhook da Meta.
+    // Handshake de verificação do webhook da Meta: o token TEM de conferir,
+    // senão qualquer um "assina" o webhook em nosso nome.
     if (req.method === 'GET') {
+      const modo = url.searchParams.get('hub.mode');
+      const token = url.searchParams.get('hub.verify_token');
       const desafio = url.searchParams.get('hub.challenge');
-      if (url.searchParams.get('hub.mode') === 'subscribe' && desafio) {
-        res.writeHead(200, { 'Content-Type': 'text/plain' });
-        return res.end(desafio);
+      const esperado = config?.instagram?.verifyToken;
+
+      if (modo !== 'subscribe' || !desafio) {
+        return responderJson(res, 400, { erro: 'verificação inválida' });
       }
-      return responderJson(res, 400, { erro: 'verificação inválida' });
+      if (!esperado || token !== esperado) {
+        return responderJson(res, 403, { erro: 'verify_token inválido' });
+      }
+
+      res.writeHead(200, { 'Content-Type': 'text/plain' });
+      return res.end(desafio);
     }
 
     if (req.method !== 'POST') return responderJson(res, 405, { erro: 'método' });

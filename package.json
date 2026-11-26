@@ -13,6 +13,7 @@
     "verify:ig": "node scripts/verificar-ig.mjs",
     "verify:api": "npm run verify:links && npm run verify:ig",
     "ensaiar": "node scripts/ensaiar-story.mjs",
+    "publicar": "node scripts/publicar-story.mjs",
     "status": "node src/status.js",
     "doctor": "node src/app.js --doctor",
     "diag:midia": "node src/app.js --diag-midia",

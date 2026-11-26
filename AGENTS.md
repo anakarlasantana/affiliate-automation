@@ -69,6 +69,8 @@ npm run verify:links   # abre os links reais na loja: produto + nosso rastreio
 npm run verify:ig      # READ-ONLY: token, conta profissional e quota do Instagram
 npm run verify:api     # os dois acima (é o que `ai verify api` executa)
 npm run servidor       # sobe /go/<chave>, /midia/<arquivo> e o webhook do Direct
+npm run ensaiar -- <url> --preco 199   # compõe o story e grava no acervo (NÃO publica)
+npm run publicar -- <chave>            # publica 1 story do acervo (exige PUBLICAR_STORIES=1)
 ```
 
 
