@@ -96,3 +96,21 @@ export async function publicarStory(ig, dados, deps = {}) {
   await aguardarContainer(ig, containerId, deps);
   return publicarContainer(ig, containerId, deps);
 }
+
+/**
+ * Envia a DM com o link (FEAT-005). Só funciona depois que a pessoa falou
+ * primeiro — a janela de 24h é do Instagram, não nossa.
+ */
+export async function enviarMensagem(ig, { igsid, texto }, { http = axios } = {}) {
+  if (!igsid) throw new Error('igsid obrigatório');
+  if (!texto) throw new Error('texto obrigatório');
+
+  const { data } = await http.post(
+    urlGrafo(ig, `${ig.userId}/messages`),
+    { recipient: { id: igsid }, message: { text: texto } },
+    { params: { access_token: ig.token }, timeout: 20_000 },
+  );
+
+  return data?.message_id || null;
+}
+

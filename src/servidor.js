@@ -17,6 +17,7 @@ import { fileURLToPath } from 'node:url';
 import config from './config.js';
 
 import {
+  carregarDestinos,
   chaveDoCaminho,
   destinoPadrao,
   montarDestino,
@@ -229,8 +230,21 @@ export function criarServidor({
 // Executado direto (`npm run servidor`): sobe as três rotas públicas.
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   (async () => {
-    // Import dinâmico: os testes não tocam no SQLite (better-sqlite3 nativo).
-    const { listarDirectRespondidos, marcarDirectRespondido } = await import('./database.js');
+    // Import dinâmico (SQLite nativo). Se o binding não estiver compilado — caso
+    // de um clone com `npm ci --ignore-scripts` — o servidor sobe mesmo assim,
+    // com idempotência só em memória, em vez de morrer no boot.
+    let listarDirectRespondidos = () => [];
+    let marcarDirectRespondido = () => false;
+    try {
+      const banco = await import('./database.js');
+      listarDirectRespondidos = banco.listarDirectRespondidos;
+      marcarDirectRespondido = banco.marcarDirectRespondido;
+    } catch (erro) {
+      console.log(`   ⚠️  SQLite indisponível (${erro.message.split('\n')[0]})`);
+      console.log('      idempotência do Direct fica só em memória nesta execução');
+    }
+
+    const { enviarMensagem } = await import('./canais/instagram.js');
 
     // Idempotência sobrevive ao restart: a Meta reenvia webhook.
     const respondidos = {};
@@ -238,16 +252,31 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
       respondidos[mid] = { igsid, quando: Date.now() };
     }
 
+    const tokenOk = Boolean(config.instagram.userId && config.instagram.token);
+    const enviarDirect = tokenOk
+      ? ({ igsid, texto }) => enviarMensagem(config.instagram, { igsid, texto })
+      : async ({ igsid, texto }) => {
+          // Sem token: ensaio local — mostra exatamente o que seria enviado.
+          console.log(`   🧪 (ensaio) Direct para ${igsid}:`);
+          console.log(`      ${texto.replace(/\n/g, '\n      ')}`);
+        };
+
     const porta = config.publicacao.porta;
+    const arquivoDestinos = path.join(config.caminhos.data, 'go-destinos.json');
+    const destinos = carregarDestinos(arquivoDestinos);
 
     criarServidor({
       config,
+      destinos,
       respondidos,
+      enviarDirect,
       aoMarcar: (mid, igsid) => marcarDirectRespondido(mid, igsid),
+      avisar: (msg) => console.log(`   ${msg}`),
     }).listen(porta, () => {
       console.log(`🌐 servidor em http://127.0.0.1:${porta}`);
       console.log('   GET  /go/<chave>  ·  GET /midia/<arquivo>  ·  POST /webhooks/instagram');
-      console.log(`   Direct: ${Object.keys(respondidos).length} mensagem(ns) já respondida(s) nas últimas 24h`);
+      console.log(`   Destinos: ${Object.keys(destinos).length} chave(s) em ${arquivoDestinos}`);
+      console.log(`   Direct: ${tokenOk ? 'token presente' : 'ENSAIO (sem token)'} · ${Object.keys(respondidos).length} já respondida(s)`);
       if (!config.publicacao.baseUrl) {
         console.log('   ⚠️  PUBLIC_BASE_URL vazio — a Meta não conseguirá baixar a mídia');
       }

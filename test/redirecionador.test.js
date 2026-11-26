@@ -6,12 +6,18 @@
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 
 import {
+  carregarDestinos,
   chaveDoCaminho,
   destinoPadrao,
   montarDestino,
   registrarClique,
+  registrarDestino,
+  salvarDestinos,
 } from '../src/redirecionador.js';
 
 test('extrai a chave de /go/<chave>', () => {
@@ -60,4 +66,27 @@ test('destino padrão respeita o modo configurado (grupo x oferta)', () => {
   assert.equal(destinoPadrao('oferta', alvos), alvos.oferta);
   assert.equal(destinoPadrao('nada', alvos), null);
   assert.equal(destinoPadrao('grupo', {}), null);
+});
+
+test('mapa de destinos persiste em disco e só aceita https', () => {
+  const pasta = fs.mkdtempSync(path.join(os.tmpdir(), 'destinos-'));
+  const arquivo = path.join(pasta, 'go-destinos.json');
+
+  try {
+    assert.deepEqual(carregarDestinos(arquivo), {}, 'arquivo ausente = mapa vazio');
+
+    registrarDestino(arquivo, 'MLB1', 'https://produto.mercadolivre.com.br/MLB-1-_JM');
+    registrarDestino(arquivo, 'PERIGO', 'javascript:alert(1)');
+    registrarDestino(arquivo, 'INSEGURO', 'http://exemplo.com/x');
+
+    const mapa = carregarDestinos(arquivo);
+    assert.equal(mapa.MLB1, 'https://produto.mercadolivre.com.br/MLB-1-_JM');
+    assert.equal(mapa.PERIGO, undefined, 'javascript: nunca entra');
+    assert.equal(mapa.INSEGURO, undefined, 'http: nunca entra');
+
+    assert.equal(salvarDestinos(arquivo, { A: 'https://a.com' }), true);
+    assert.deepEqual(carregarDestinos(arquivo), { A: 'https://a.com' });
+  } finally {
+    fs.rmSync(pasta, { recursive: true, force: true });
+  }
 });
