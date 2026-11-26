@@ -37,7 +37,7 @@ async function semCredenciais(chaves, fn) {
   }
 }
 
-/* ============ CA-6: loja sem credencial nunca gera link ============ */
+/* ====== FEAT-001 · CA-6: loja sem credencial nunca gera link ====== */
 
 test('loja sem credencial devolve meuLink vazio e motivo sem-credencial', async () => {
   const r = await semCredenciais(['AMAZON_TAG'], () =>
@@ -77,7 +77,7 @@ test('a classe base reporta a credencial ausente e não se declara configurada',
   assert.equal(LojaDeTeste.estaConfigurado(), false);
 });
 
-/* ====== CA-7: comparação entrada × link gerado (mesma loja, mesmo produto) ====== */
+/* ====== FEAT-001 · CA-7: comparação entrada × link gerado (mesma loja, mesmo produto) ====== */
 
 test('identidade do produto casa entre entrada e link gerado', () => {
   assert.equal(chaveProduto(MELI_ENTRADA), 'meli:MLB4161352905');

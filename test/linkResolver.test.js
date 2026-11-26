@@ -23,7 +23,7 @@ import { normalizarOrigem } from '../src/config.js';
 const FIXTURES = path.join(path.dirname(fileURLToPath(import.meta.url)), 'fixtures');
 const ler = (nome) => fs.readFileSync(path.join(FIXTURES, nome), 'utf8');
 
-/* ================== redirect JS do Promobit ================== */
+/* ================== redirect JS do Promobit (FEAT-001 · CA-2) ================== */
 
 test('extrai o destino do HTML REAL do promoby.me (padrao "l = \'...\'")', () => {
   const html = ler('promoby-redirect.html');

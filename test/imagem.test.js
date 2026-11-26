@@ -91,7 +91,7 @@ const webpVp8l = (largura, altura) => {
   return buf;
 };
 
-/* ================== o bug das miniaturas 72x72 ================== */
+/* ========== o bug das miniaturas 72x72 (FEAT-002 · CA-1, CA-2) ========== */
 
 test('miniatura REAL do WhatsApp (msg.body, 72x72) e classificada como miniatura', () => {
   for (const arquivo of ['miniatura-whatsapp-1-72x72.jpg', 'miniatura-whatsapp-2-72x72.jpg']) {
@@ -210,7 +210,7 @@ test('validarImagemBase64 rejeita lixo e aceita as fixtures reais', () => {
   );
 });
 
-/* ================== baixarMidiaComRetry ================== */
+/* ================== baixarMidiaComRetry (FEAT-002 · CA-2) ================== */
 
 const clienteFake = (comportamento) => {
   const chamadas = [];
