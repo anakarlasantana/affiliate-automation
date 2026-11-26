@@ -78,8 +78,10 @@ descarte silencioso.
 
 ## Providers registrados
 
-`PROVIDERS` em `src/affiliates/index.js`: Amazon, Shopee, Magalu, Mercado Livre,
-Shein, TikTok Shop. Além deles, lojas **sem código novo** entram por `.env`:
+`PROVIDERS` em `src/affiliates/index.js`: `Amazon`, `Shopee`, `Magalu`,
+`MercadoLivre`, `Shein`, `TikTokShop` — esses são os valores de `static nome`,
+que aparecem em logs, em `resumoLojas()` e no `loja` devolvido por
+`converterParaAfiliado()`. Além deles, lojas **sem código novo** entram por `.env`:
 
 ```bash
 AFFILIATE_GENERIC_1=aliexpress.com:aff_fcid:MEU_ID

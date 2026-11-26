@@ -13,10 +13,13 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
+  LIMITE_LEGENDA_FOTO,
   MIN_LADO_FOTO,
   baixarMidiaComRetry,
   classificarMidia,
   dimensoesImagem,
+  legendaParaFoto,
+  placeholderPara,
   validarImagemBase64,
 } from '../src/imagem.js';
 
@@ -261,3 +264,46 @@ test('midia baixada que ainda for miniatura e pega pelo gate de dimensao', () =>
   const bytes = ler('miniatura-whatsapp-1-72x72.jpg');
   assert.equal(classificarMidia(comoDataUrl(bytes)).miniatura, true);
 });
+
+/* ================ placeholder da loja (FEAT-002 · CA-3) ================ */
+
+test('placeholder devolve data-url válida para qualquer loja', () => {
+  // A arte global (assets/placeholder-confira-produto.png ou PLACEHOLDER_IMAGEM)
+  // é a última barreira: sem ela, a oferta sairia sem imagem (texto puro).
+  for (const loja of ['MercadoLivre', 'Shopee', 'Amazon', 'LojaDesconhecida', '']) {
+    const rotulo = loja || '(vazio)';
+    const ph = placeholderPara(loja);
+    assert.ok(String(ph.base64).startsWith('data:image/'), `${rotulo}: é data-url`);
+    assert.equal(validarImagemBase64(ph.base64).valido, true, `${rotulo}: imagem válida`);
+    assert.equal(ph.origem, 'placeholder', `${rotulo}: origem declarada`);
+  }
+});
+
+/* ================ legenda da foto (FEAT-002 · CA-4) ================ */
+
+test('legenda que cabe no limite passa intacta, com o link', () => {
+  const link = 'https://s.shopee.com.br/abc123';
+  const texto = `Tênis em promoção por R$ 199\n${link}`;
+  assert.equal(legendaParaFoto(texto, link), texto);
+});
+
+test('legenda gigante é truncada preservando o link de afiliado', () => {
+  const link =
+    'https://produto.mercadolivre.com.br/MLB-4161352905-_JM?matt_tool=20619494&matt_word=affiliate';
+  const texto = `${'x'.repeat(2500)}\n${link}\n${'y'.repeat(500)}`;
+
+  const legenda = legendaParaFoto(texto, link);
+
+  assert.ok(legenda.length <= LIMITE_LEGENDA_FOTO, `respeita o limite de ${LIMITE_LEGENDA_FOTO}`);
+  assert.ok(legenda.includes(link), 'o link sobrevive ao truncamento');
+  assert.ok(legenda.includes('…'), 'marca onde cortou');
+});
+
+test('legenda gigante sem o link no texto corta pelo limite e não inventa link', () => {
+  const link = 'https://s.shopee.com.br/nao-esta-no-texto';
+  const legenda = legendaParaFoto('z'.repeat(2000), link);
+
+  assert.ok(legenda.length <= LIMITE_LEGENDA_FOTO);
+  assert.ok(!legenda.includes(link), 'não anexa link que não estava na mensagem');
+});
+

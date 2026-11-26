@@ -13,6 +13,8 @@ import { fileURLToPath } from 'node:url';
 import {
   extrairRedirectJS,
   extrairGaleria,
+  extrairLinks,
+  sanitizarUrl,
   subirResolucao,
   urlCanonicaDeProduto,
 } from '../src/linkResolver.js';
@@ -170,4 +172,61 @@ test('galeria devolve lista vazia em página sem foto de produto', () => {
   assert.deepEqual(extrairGaleria(''), []);
   assert.deepEqual(extrairGaleria(null), []);
 });
+});
+
+/* ============ extração de links da mensagem (FEAT-001 · CA-1) ============ */
+
+test('extrai todos os links http(s) de uma mensagem ouvida e ignora o texto', () => {
+  const texto =
+    'ESSE CUPOM VOLTOU E TA MELHOR AINDA\n' +
+    'https://meli.la/2sRz4wz\n' +
+    'e tambem https://s.shopee.com.br/abc123 corram!';
+  assert.deepEqual(extrairLinks(texto), [
+    'https://meli.la/2sRz4wz',
+    'https://s.shopee.com.br/abc123',
+  ]);
+});
+
+test('extração devolve lista vazia para mensagem sem link', () => {
+  assert.deepEqual(extrairLinks(''), []);
+  assert.deepEqual(extrairLinks(null), []);
+  assert.deepEqual(extrairLinks(undefined), []);
+  assert.deepEqual(extrairLinks('so texto, nenhum endereco'), []);
+});
+
+test('extração respeita delimitadores: parêntese e angle brackets', () => {
+  assert.deepEqual(extrairLinks('veja (https://meli.la/2sRz4wz) agora'), [
+    'https://meli.la/2sRz4wz',
+  ]);
+  assert.deepEqual(extrairLinks('<https://amzn.to/3abcDEF>'), ['https://amzn.to/3abcDEF']);
+});
+
+/* ============ sanitização de tracking alheio (FEAT-001 · CA-3) ============ */
+
+test('sanitiza tracking de terceiros e preserva a identidade do produto', () => {
+  // Caso real: o meli.la do grupo carregava o matt_tool de OUTRO afiliado.
+  const suja =
+    'https://www.mercadolivre.com.br/MLB-4161352905-produto-_JM' +
+    '?matt_tool=35645668&matt_word=jeffrecomenda&utm_source=grupo&fbclid=xyz&searchVariation=123';
+  const limpa = sanitizarUrl(suja);
+  assert.ok(!/matt_tool/.test(limpa), 'tracking de outro afiliado sai');
+  assert.ok(!/utm_source/.test(limpa), 'utm_ sai');
+  assert.ok(!/fbclid/.test(limpa), 'fbclid sai');
+  assert.ok(/searchVariation=123/.test(limpa), 'searchVariation é preservado de propósito');
+  assert.ok(/MLB-4161352905/.test(limpa), 'a identidade do produto sobrevive à limpeza');
+});
+
+test('aplica os parâmetros extras do Perfil da Loja (smtt da Shopee)', () => {
+  const suja = 'https://shopee.com.br/product/762281166/23697998466?smtt=0.1234&af_siteid=888';
+  const semPerfil = sanitizarUrl(suja);
+  assert.ok(/smtt=0.1234/.test(semPerfil), 'smtt só sai se o perfil da loja mandar');
+  assert.ok(!/af_siteid/.test(semPerfil), 'af_siteid é tracking genérico');
+
+  const comPerfil = sanitizarUrl(suja, [/^smtt$/i]);
+  assert.equal(comPerfil, 'https://shopee.com.br/product/762281166/23697998466');
+});
+
+test('sanitização devolve a entrada quando a URL não é parseável', () => {
+  assert.equal(sanitizarUrl('nao-e-url'), 'nao-e-url');
+  assert.equal(sanitizarUrl(''), '');
 });

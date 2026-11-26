@@ -59,11 +59,17 @@ Percorra a cadeia **na ordem** e descubra em qual etapa parou.
 Comandos úteis:
 
 ```bash
+npm run verify:links           # pipeline real + link aberto na loja (produto e rastreio)
 npm run doctor                 # configuração efetiva + lojas
 npm run status                 # fila + credenciais faltantes
 DIAG_MIDIA=1 npm start         # conecta e ESCUTA, mas NÃO envia; imprime o payload cru de cada foto
 npm run diag:midia             # varre histórico dos grupos e relata a cascata de imagem
 ```
+
+`verify:links` diz em qual etapa cada link parou (expansão, mergulhador,
+conversão, rastreio, rede) e aceita URLs avulsas:
+`npm run verify:links -- https://meli.la/xxxx`.
+
 
 Fixture de referência para redirect por `<meta refresh>` em cadeia:
 `test/fixtures/promoby-redirect.html` (usada em `test/linkResolver.test.js`).

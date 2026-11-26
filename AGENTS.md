@@ -48,6 +48,7 @@ Não há lint nem build: o projeto é Node >=18, ESM puro, roda direto de `src/`
 | contrato do provider (campos, `perfil`, `converter`) | `docs/harness/contrato-provider.md` |
 | receitas: nova loja, depurar link, deploy | `docs/harness/receitas.md` |
 | peculiaridades de link por loja | `docs/links-afiliados-por-loja.md` |
+| requisitos e critérios de aceite | `spec/<ID>-<slug>/requisito.md` (gate: `ai spec review` / `ai spec approve`) |
 | variáveis de ambiente | `.env.example` + `src/config.js` |
 | operação (systemd, Docker, QR, doctor) | `README.md` |
 
@@ -62,6 +63,14 @@ Não há lint nem build: o projeto é Node >=18, ESM puro, roda direto de `src/`
 
 ## Verificação antes de dizer "pronto"
 
-Rode `npm run check && npm test`. Se tocou em link/encurtador, adicione um caso
-em `test/linkResolver.test.js` usando fixture de `test/fixtures/` (ver
-`test/fixtures/ORIGEM.md` para a procedência das amostras).
+```bash
+npm run verify         # check + test (é o que `ai verify ready` executa)
+npm run verify:links   # abre os links reais na loja: produto + nosso rastreio
+```
+
+`npm run verify:links` depende de rede (é o `ai verify api` do harness): usa
+`test/fixtures/links-ouvidos.json` e reporta PASS/FAIL/SKIP por link. Se tocou em
+link/encurtador, adicione um caso em `test/linkResolver.test.js` com fixture de
+`test/fixtures/` (procedência em `test/fixtures/ORIGEM.md`) **e** inclua o link
+novo no fixture de verificação.
+

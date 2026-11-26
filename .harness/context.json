@@ -42,13 +42,24 @@
 
   // ---------- Prontidão (definition of done em UM comando) ----------
   // Lido por `ai verify ready`; tem precedência sobre testCommand.
-  // Ambos os comandos já existem no package.json.
+  //
+  // O harness executa via `spawn(..., shell:false)` — NÃO há shell. Por isso
+  // a prontidão aponta para o script npm `verify`, que agrupa os dois passos:
+  // um `&&` aqui viraria argumento do npm ("sh: Syntax error: word unexpected").
   "verification": {
     "readiness": {
-      "command": "npm run check && npm test",
+      "command": "npm run verify",
       "timeoutMs": 180000
+    },
+    // Persona de API (L1): exercita o pipeline real (expansão → sanitização →
+    // conversão) e abre o link final na loja para conferir produto + rastreio.
+    // Fica fora do readiness de propósito: depende de rede de terceiros.
+    "api": {
+      "command": "npm run verify:links",
+      "timeoutMs": 300000
     }
   }
+
 
   // ---------- e2e: omitido DE PROPÓSITO ----------
   // O app é um bot de longa duração (WhatsApp via wppconnect com sessão por QR,

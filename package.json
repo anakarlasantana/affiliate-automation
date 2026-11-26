@@ -7,10 +7,12 @@
   "scripts": {
     "start": "node src/app.js",
     "check": "for f in src/*.js src/affiliates/*.js; do node --check $f; done",
+    "verify": "npm run check && npm test",
     "status": "node src/status.js",
     "doctor": "node src/app.js --doctor",
     "diag:midia": "node src/app.js --diag-midia",
     "test": "node --test",
+    "verify:links": "node scripts/verificar-links.mjs",
     "reset-sessao": "rm -rf tokens"
   },
   "dependencies": {
