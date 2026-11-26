@@ -37,6 +37,8 @@ o **meu** link, para o leitor comprar o produto certo pelo meu rastreio.
   prova: `unit:test/imagem.test.js`
 - **CA-4** — When a legenda com o nosso link excede 1000 caracteres, the sistema shall truncar o texto preservando o link de afiliado.
   prova: `unit:test/imagem.test.js`
+- **CA-5** — When a página do produto expõe og:image, the sistema shall publicar a foto do produto em vez do placeholder.
+  prova: `api:verify-links`
 
 ## Não-objetivos
 

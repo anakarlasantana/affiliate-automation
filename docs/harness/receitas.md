@@ -59,7 +59,7 @@ Percorra a cadeia **na ordem** e descubra em qual etapa parou.
 Comandos úteis:
 
 ```bash
-npm run verify:links           # pipeline real + link aberto na loja (produto e rastreio)
+npm run verify:links           # pipeline real + link aberto na loja (produto, rastreio e imagem)
 npm run doctor                 # configuração efetiva + lojas
 npm run status                 # fila + credenciais faltantes
 DIAG_MIDIA=1 npm start         # conecta e ESCUTA, mas NÃO envia; imprime o payload cru de cada foto

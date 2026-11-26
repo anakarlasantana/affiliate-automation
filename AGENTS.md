@@ -69,8 +69,10 @@ npm run verify:links   # abre os links reais na loja: produto + nosso rastreio
 ```
 
 `npm run verify:links` depende de rede (é o `ai verify api` do harness): usa
-`test/fixtures/links-ouvidos.json` e reporta PASS/FAIL/SKIP por link. Se tocou em
-link/encurtador, adicione um caso em `test/linkResolver.test.js` com fixture de
-`test/fixtures/` (procedência em `test/fixtures/ORIGEM.md`) **e** inclua o link
-novo no fixture de verificação.
+`test/fixtures/links-ouvidos.json` e reporta PASS/FAIL/SKIP por link **e a
+imagem que seria publicada** (`site:og-image`, galeria, `loja:api-imagem` ou
+`PLACEHOLDER`). Placeholder não converte em venda — `--falhar-placeholder`
+reprova quando acontecer. Se tocou em link/encurtador, adicione um caso em
+`test/linkResolver.test.js` com fixture de `test/fixtures/` (procedência em
+`test/fixtures/ORIGEM.md`) **e** inclua o link novo no fixture de verificação.
 

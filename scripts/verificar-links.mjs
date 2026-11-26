@@ -10,11 +10,18 @@
  * produto aparece no destino e se o rastreio está presente.
  *
  * Uso:
- *   npm run verify:links                     # usa test/fixtures/links-ouvidos.json
- *   npm run verify:links -- <url> [<url>…]   # URLs avulsas
- *   npm run verify:links -- --json           # saída para máquina
+ *   npm run verify:links                       # usa test/fixtures/links-ouvidos.json
+ *   npm run verify:links -- <url> [<url>…]     # URLs avulsas
+ *   npm run verify:links -- --json             # saída para máquina
+ *   npm run verify:links -- --falhar-placeholder  # exit 1 se sairia placeholder
  *
- * Exit: 0 = nenhum FAIL (SKIP não é falha) · 1 = algum FAIL.
+ * Além do link, reporta a IMAGEM que seria publicada (site:og-image, galeria,
+ * loja:api-imagem ou PLACEHOLDER). Placeholder não reprova por padrão — a loja
+ * pode estar bloqueando o HTML de forma transitória — mas o resumo mostra a
+ * contagem, porque cartão genérico não converte em venda.
+ *
+ * Exit: 0 = nenhum FAIL (SKIP não é falha) · 1 = algum FAIL
+ *       (ou placeholder, com --falhar-placeholder).
  *
  * Por que não é `node --test`: depende de rede (lojas externas). Teste unitário
  * não pode quebrar por um 503 do Mercado Livre; isto é verificação de
@@ -30,6 +37,9 @@ import {
   sanitizarUrl,
   desembrulharAfiliadoRedirecionador,
   desembrulharVerificacaoMeli,
+  extrairImagemProduto,
+  extrairImagemDaLoja,
+  extrairImagemDeUrl,
 } from '../src/linkResolver.js';
 import {
   converterParaAfiliado,
@@ -39,6 +49,7 @@ import {
   perfilDeUrl,
   resolverMergulhador,
 } from '../src/affiliates/index.js';
+import { imagemPelaApiDaLoja } from '../src/lojaApi.js';
 import config from '../src/config.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -116,6 +127,38 @@ function produtoNoDestino(chave, urlEntrada, urlFinal) {
   if (chave) tokens.push(chave.split(':').slice(1).join('')); // "meli:MLB123" → "MLB123"
   for (const run of String(urlEntrada).match(/\d{6,}/g) || []) tokens.push(run);
   return tokens.some((t) => t && alvo.includes(normalizar(t)));
+}
+
+/**
+ * Cascata de imagem SEM a foto da mensagem (o fixture é só o link).
+ * Mesma ordem de src/app.js: site (og:image) → galeria → API da loja →
+ * placeholder. Devolve a origem e o tamanho: é o que diz se a publicação vai
+ * mostrar o produto ou um cartão genérico que não converte.
+ */
+async function resolverImagem(urlProduto, loja, chave) {
+  const medir = (r) => ({ origem: r.origem, kb: Math.round(r.base64.length / 1024) });
+  try {
+    const og = await extrairImagemProduto(urlProduto);
+    if (og) return medir(og);
+  } catch {
+    /* segue a cascata */
+  }
+  try {
+    const galeria = await extrairImagemDaLoja(urlProduto);
+    if (galeria) return medir(galeria);
+  } catch {
+    /* segue a cascata */
+  }
+  try {
+    const urlImagem = chave ? await imagemPelaApiDaLoja(loja, chave) : null;
+    if (urlImagem) {
+      const baixada = await extrairImagemDeUrl(urlImagem);
+      if (baixada) return medir(baixada);
+    }
+  } catch {
+    /* segue a cascata */
+  }
+  return { origem: 'PLACEHOLDER', kb: 0 };
 }
 
 /**
@@ -211,6 +254,12 @@ async function verificar(item, ids) {
     }
   }
 
+  // 6.5) Imagem: o que seria publicado — foto do produto ou placeholder?
+  //      Sem isso, "publicou com sucesso" esconde o cartão genérico que não vende.
+  const imagem = await resolverImagem(alvo, loja, chave);
+  registro.imagem = imagem.origem;
+  registro.imagemKb = imagem.kb;
+
   // 7) Rastreio no link final
   const rastreio = rastreioNoLink(meuLink, loja, ids);
   registro.rastreio = rastreio.detalhe;
@@ -252,6 +301,12 @@ function carregarEntradas(argv) {
 async function principal() {
   const argv = process.argv.slice(2);
   const json = argv.includes('--json');
+  if (json) {
+    // As libs (linkResolver, providers) logam no console. Em --json a saída
+    // tem de ser JSON puro: o exit code continua sinalizando o resultado.
+    console.log = () => {};
+    console.warn = () => {};
+  }
   const entradas = carregarEntradas(argv);
   const ids = nossosIds();
 
@@ -274,6 +329,13 @@ async function principal() {
     if (r.produto) console.log(`   produto   : ${r.produto.slice(0, 110)}`);
     if (r.nossoLink) console.log(`   nosso link: ${r.nossoLink.slice(0, 110)}`);
     if (r.chaveGerada) console.log(`   chave ger.: ${r.chaveGerada}`);
+    if (r.imagem) {
+      const comoPublica =
+        r.imagem === 'PLACEHOLDER'
+          ? 'PLACEHOLDER (cartão genérico — não converte)'
+          : `${r.imagem} (${r.imagemKb} KB)`;
+      console.log(`   imagem    : ${comoPublica}`);
+    }
     if (r.http) {
       console.log(
         `   http      : ${r.http} · produto no destino: ${r.produtoNoDestino ? 'sim' : 'NAO'}`,
@@ -284,21 +346,31 @@ async function principal() {
   }
 
   const conta = (v) => resultados.filter((r) => r.veredito === v).length;
+  const semImagem = resultados.filter((r) => r.imagem === 'PLACEHOLDER').length;
+  const comFoto = resultados.filter((r) => r.imagem && r.imagem !== 'PLACEHOLDER').length;
   const resumo = {
     total: resultados.length,
     pass: conta('PASS'),
     fail: conta('FAIL'),
     skip: conta('SKIP'),
+    imagensDoProduto: comFoto,
+    placeholders: semImagem,
   };
 
   if (json) {
-    console.log(JSON.stringify({ resumo, resultados }, null, 2));
+    process.stdout.write(`${JSON.stringify({ resumo, resultados }, null, 2)}\n`);
   } else {
     console.log(
-      `\nRESULTADO: ${resumo.pass} PASS · ${resumo.fail} FAIL · ${resumo.skip} SKIP (de ${resumo.total})`,
+      `\nIMAGENS: ${comFoto} com foto do produto · ${semImagem} placeholder${
+        semImagem ? '  ← cartão genérico não converte' : ''
+      }`,
+    );
+    console.log(
+      `RESULTADO: ${resumo.pass} PASS · ${resumo.fail} FAIL · ${resumo.skip} SKIP (de ${resumo.total})`,
     );
   }
-  process.exit(resumo.fail > 0 ? 1 : 0);
+  const falharPlaceholder = argv.includes('--falhar-placeholder');
+  process.exit(resumo.fail > 0 || (falharPlaceholder && semImagem > 0) ? 1 : 0);
 }
 
 principal().catch((erro) => {
