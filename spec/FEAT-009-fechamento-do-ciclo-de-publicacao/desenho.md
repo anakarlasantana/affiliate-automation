@@ -50,7 +50,8 @@ A chamada real ao ffmpeg e ao Instagram fica nas tarefas; a validação final é
 
 ## Riscos
 
-1. **Compor a cada oferta** custa ~1 s (ffmpeg). Se virar gargalo, compor só quando houver slot no dia.
+1. **Compor a cada oferta** custa ~1 s (ffmpeg). O timeout da composição no pipeline é **15 s** (era
+   60 s) para um ffmpeg travado não segurar o handler que enfileira a oferta no WhatsApp.
 2. **`app.js` não roda localmente sem WhatsApp**: o hook é validado por unit + `npm run check`; a
    prova real acontece no servidor com `DIAG_MIDIA=1`.
 3. `og:title` pode faltar → criativo sem título (como antes) e `titulo: ''` no acervo.

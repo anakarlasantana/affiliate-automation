@@ -18,8 +18,9 @@ limite diário — para o sistema funcionar sozinho no servidor, não só no ens
 - **Um único ponto de chamada** no `app.js` registra a oferta; falha ali **nunca** derruba o WhatsApp.
 - Título vem do `og:title` da página já baixada (nenhum request extra).
 - `DIRETO_ATIVO=0` desliga a resposta automática mesmo com webhook válido (flag > assinatura).
-- Dedup e limite diário são medidos **pelo acervo** (`publicadoEm`), não pela quota da API — a quota
-  ficou em 0 após publicar, então não serve como contador confiável.
+- Dedup e limite diário são medidos **pelo acervo** (`publicadoEm`), não pela quota da API — ela tem
+  **latência de propagação** (ficou em `0` e só depois mostrou `1/100`), então não serve de contador
+  imediato.
 - Dia operacional vem de `inicioDoDiaOperacional()` (`TZ_OPERACAO`), nunca do relógio do host.
 - Oferta sem foto real (placeholder) **não entra no acervo** — story sem imagem do produto não
   publica; o destino do link curto, sim, é registrado.

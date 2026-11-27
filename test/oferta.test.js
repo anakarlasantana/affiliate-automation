@@ -157,6 +157,24 @@ test('o título do og:title vai para o criativo e para o acervo (CA-2)', async (
   });
 });
 
+test('sem identidade de produto devolve sem-chave e não compõe (loja genérica)', async () => {
+  await comPastas(async ({ cfg, midiaDir }) => {
+    const r = await registrarOferta({
+      chave: '',
+      link: LINK,
+      preco: 199,
+      imagemBase64: fotoDataUrl(),
+      config: cfg,
+      deps: { compor: async () => assert.fail('sem chave não compõe') },
+    });
+
+    assert.equal(r.acervo, false);
+    assert.equal(r.destino, false, 'sem chave não há link curto');
+    assert.equal(r.motivo, 'sem-chave');
+    assert.equal(buscarNoAcervo(midiaDir, ''), null);
+  });
+});
+
 test('chaveSegura troca separadores por hífen', () => {
   assert.equal(chaveSegura('meli:MLB4161352905'), 'meli-MLB4161352905');
   assert.equal(chaveSegura('shopee:762281166.23697998466'), 'shopee-762281166-23697998466');

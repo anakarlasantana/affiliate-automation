@@ -275,9 +275,11 @@ export function montarArgsComTemplate({
 }
 
 /** Executa a composição sobre o template (ffmpeg do sistema). */
-export async function comporComTemplate({ ffmpeg = 'ffmpeg', ...opcoes } = {}) {
+export async function comporComTemplate({ ffmpeg = 'ffmpeg', timeoutMs = 15_000, ...opcoes } = {}) {
   const args = montarArgsComTemplate(opcoes);
-  await executar(ffmpeg, args, { timeout: 60_000, maxBuffer: 8 * 1024 * 1024 });
+  // Timeout curto de propósito: no pipeline do WhatsApp esta composição roda no
+  // mesmo handler que enfileira a oferta — ffmpeg travado não pode segurar 1 min.
+  await executar(ffmpeg, args, { timeout: timeoutMs, maxBuffer: 8 * 1024 * 1024 });
   return opcoes.saida;
 }
 

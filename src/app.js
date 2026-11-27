@@ -481,8 +481,9 @@ async function processarOferta(
         imagemBase64,
         placeholder: origemFoto === 'placeholder',
       });
+      // Silencioso nos motivos esperados (`sem-chave`, `sem-foto`, `sem-preco`):
+      // são rotina em loja genérica e em oferta sem preço. Só o sucesso loga.
       if (registro?.acervo) console.log(`   📸 Story pronto no acervo: ${registro.chave}`);
-      else if (registro?.motivo) console.log(`   📸 Sem story (${registro.motivo})`);
     } catch (erro) {
       console.warn(`   ⚠️  Registro para publicação falhou (segue sem story): ${erro.message}`);
     }

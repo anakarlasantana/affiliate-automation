@@ -45,7 +45,12 @@ export async function registrarOferta({
   config: cfg = config,
   deps = {},
 } = {}) {
-  if (!chave) throw new Error('chave obrigatória');
+  // Sem identidade de produto (loja genérica, sem `idProduto`) não há dedup nem
+  // como montar o link curto. Devolve motivo em vez de lançar: erro esperado não
+  // pode virar warning em toda oferta.
+  if (!chave) {
+    return { chave: '', destino: false, acervo: false, motivo: 'sem-chave' };
+  }
 
   const midiaDir = deps.midiaDir || cfg.publicacao.midiaDir;
   const dataDir = deps.dataDir || cfg.caminhos.data;

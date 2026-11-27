@@ -121,8 +121,8 @@ export function montarArgsStory({
 }
 
 /** Gera o JPEG do story de verdade (usa o ffmpeg do sistema). */
-export async function comporStory({ ffmpeg = 'ffmpeg', ...opcoes } = {}) {
+export async function comporStory({ ffmpeg = 'ffmpeg', timeoutMs = 15_000, ...opcoes } = {}) {
   const args = montarArgsStory(opcoes);
-  await executar(ffmpeg, args, { timeout: 60_000, maxBuffer: 8 * 1024 * 1024 });
+  await executar(ffmpeg, args, { timeout: timeoutMs, maxBuffer: 8 * 1024 * 1024 });
   return opcoes.saida;
 }
