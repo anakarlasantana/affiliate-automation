@@ -28,9 +28,15 @@ export const PREFIXO = '[ig]';
  * @param {Record<string, {arquivo?:string, criado?:string, publicadoEm?:string}>} acervo
  * @returns {{chave:string, arquivo:string, preco:number, titulo:string}|null}
  */
-export function proximoPendente(acervo = {}) {
+export function proximoPendente(acervo = {}, formato = 'story') {
   const pendentes = Object.entries(acervo)
-    .filter(([, r]) => r && !r.publicadoEm && r.arquivo)
+    .filter(
+      ([, r]) =>
+        r &&
+        !r.publicadoEm &&
+        r.arquivo &&
+        (r.formato || 'story') === formato,
+    )
     .map(([chave, r]) => ({
       chave,
       arquivo: r.arquivo,

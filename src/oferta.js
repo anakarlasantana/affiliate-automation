@@ -15,6 +15,7 @@ import config from './config.js';
 import { dimensoesImagem } from './imagem.js';
 import { registrarNoAcervo } from './midia/acervo.js';
 import { comporStory, textosDoStory } from './midia/compor.js';
+import { comporFeed as comporFeedPadrao } from './midia/feed.js';
 import { nomeDaMidia } from './midia/quadro.js';
 import { carregarLayout, comporComTemplate } from './midia/layout.js';
 import { registrarDestino } from './redirecionador.js';
@@ -91,21 +92,59 @@ export async function registrarOferta({
 
   const fotoTemporaria = path.join(midiaDir, `.tmp-${process.pid}-${Date.now()}.jpg`);
   fs.writeFileSync(fotoTemporaria, buffer);
+  const dimensoes = dimensoesImagem(buffer);
+  /** Nome do criativo 4:5 quando o feed está ligado (FEAT-013). */
+  let nomePost = null;
 
   try {
     await compor({
       base: temTemplate ? base : null,
       foto: fotoTemporaria,
-      dimensoesFoto: dimensoesImagem(buffer),
+      dimensoesFoto: dimensoes,
       layout,
       textos: { titulo, preco: textos.preco, de: textos.de, principal: textos.principal },
       saida,
     });
+
+    // Feed: compõe o 4:5 na MESMA foto temporária (antes de apagá-la). Falha aqui
+    // não pode derrubar o story — o feed é um extra, não o fluxo principal.
+    if (cfg.publicacao.feedAtivo) {
+      try {
+        const comporPost = deps.comporFeed || comporFeedPadrao;
+        nomePost = `${path.parse(nomeArquivo).name}-post.jpg`;
+        await comporPost({
+          foto: fotoTemporaria,
+          dimensoesFoto: dimensoes,
+          textos: {
+            titulo,
+            preco: textos.preco,
+            de: textos.de,
+            principal: textos.principal,
+          },
+          saida: path.join(midiaDir, nomePost),
+        });
+      } catch (erro) {
+        nomePost = null;
+        console.warn(`   ⚠️  Criativo do feed falhou (segue sem post): ${erro.message}`);
+      }
+    }
   } finally {
     fs.rmSync(fotoTemporaria, { force: true });
   }
 
   registrarNoAcervo(midiaDir, chaveUrl, { arquivo: nomeArquivo, link, preco, titulo });
+
+  // Chave POR FORMATO: o story e o post do mesmo produto não se bloqueiam, e o
+  // ciclo automático de story ignora entradas de outro formato (FEAT-013).
+  if (nomePost) {
+    registrarNoAcervo(midiaDir, `${chaveUrl}:post`, {
+      arquivo: nomePost,
+      link,
+      preco,
+      titulo,
+      formato: 'post',
+    });
+  }
 
   return { chave: chaveUrl, arquivo: nomeArquivo, destino: Boolean(link), acervo: true, motivo: null };
 }

@@ -180,3 +180,60 @@ test('chaveSegura troca separadores por hífen', () => {
   assert.equal(chaveSegura('shopee:762281166.23697998466'), 'shopee-762281166-23697998466');
   assert.equal(chaveSegura(''), '');
 });
+
+test('FEAT-013 CA-7: feed ativo compõe o 4:5 e deixa o post pendente', async () => {
+  await comPastas(async ({ cfg, midiaDir }) => {
+    cfg.publicacao.feedAtivo = true;
+    let chamouFeed = false;
+
+    const r = await registrarOferta({
+      chave: 'meli:MLB1',
+      link: LINK,
+      preco: 279.9,
+      titulo: 'Conjunto Fitness',
+      imagemBase64: fotoDataUrl(),
+      config: cfg,
+      deps: {
+        compor: async (o) => fs.writeFileSync(o.saida, 'story'),
+        comporFeed: async (o) => {
+          chamouFeed = true;
+          fs.writeFileSync(o.saida, 'post');
+        },
+      },
+    });
+
+    assert.equal(r.acervo, true);
+    assert.equal(chamouFeed, true, 'compôs o criativo do feed');
+
+    const post = buscarNoAcervo(midiaDir, 'meli-MLB1:post');
+    assert.ok(post, 'post na chave por formato');
+    assert.equal(post.formato, 'post');
+    assert.equal(post.publicadoEm, undefined, 'post fica pendente para o ciclo');
+
+    assert.equal(buscarNoAcervo(midiaDir, 'meli-MLB1').formato, 'story');
+  });
+});
+
+test('FEAT-013: falha ao compor o feed não derruba o story', async () => {
+  await comPastas(async ({ cfg, midiaDir }) => {
+    cfg.publicacao.feedAtivo = true;
+
+    const r = await registrarOferta({
+      chave: 'meli:MLB2',
+      link: LINK,
+      preco: 100,
+      titulo: 'X',
+      imagemBase64: fotoDataUrl(),
+      config: cfg,
+      deps: {
+        compor: async (o) => fs.writeFileSync(o.saida, 'story'),
+        comporFeed: async () => {
+          throw new Error('ffmpeg caiu');
+        },
+      },
+    });
+
+    assert.equal(r.acervo, true, 'story continua registrado');
+    assert.equal(buscarNoAcervo(midiaDir, 'meli-MLB2:post'), null);
+  });
+});

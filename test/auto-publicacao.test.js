@@ -254,3 +254,17 @@ test('CA-8: o ciclo loga acervo, preflight e publicação com o prefixo [ig]', a
     );
   }
 });
+
+test('CA-7: o ciclo de story ignora entradas de outro formato', () => {
+  const acervo = {
+    'a:post': {
+      arquivo: 'a-post.jpg',
+      formato: 'post',
+      criado: '2026-11-27T09:00:00Z',
+    },
+    b: { arquivo: 'b.jpg', criado: '2026-11-27T10:00:00Z' },
+  };
+
+  assert.equal(proximoPendente(acervo).chave, 'b', 'post não fura a fila do story');
+  assert.equal(proximoPendente(acervo, 'post').chave, 'a:post');
+});

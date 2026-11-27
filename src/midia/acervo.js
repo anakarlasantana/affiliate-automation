@@ -57,6 +57,9 @@ export function registrarNoAcervo(midiaDir, chave, registro = {}) {
     link: registro.link || null,
     preco: Number.isFinite(Number(registro.preco)) ? Number(registro.preco) : null,
     titulo: registro.titulo || '',
+    // Formato do criativo: `story` (9:16, padrão) ou `post` (4:5 do feed).
+    // É o que permite dedup por (produto, formato) — FEAT-013.
+    formato: registro.formato || anterior.formato || 'story',
     criado: registro.criado || new Date().toISOString(),
     // Re-registrar a mídia NÃO pode apagar o histórico de publicação.
     ...(anterior.publicadoEm ? { publicadoEm: anterior.publicadoEm } : {}),

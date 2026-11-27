@@ -292,6 +292,11 @@ const config = {
       120,
       parseInt(process.env.INTERVALO_STORY_SEG || '600', 10),
     ),
+    /**
+     * Compõe também o criativo 4:5 do feed na captura (FEAT-013).
+     * Ligado por padrão: sem isso o post teria de ser composto na mão.
+     */
+    feedAtivo: /^(1|true|sim|on)$/i.test(process.env.FEED_ATIVO ?? '1'),
     maxReelsDia: parseInt(process.env.MAX_REELS_DIA || '1', 10),
     /** Resposta automática no Direct (FEAT-005) */
     diretoAtivo: /^(1|true|sim|on)$/i.test(process.env.DIRETO_ATIVO || ''),
