@@ -8,6 +8,7 @@
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
 
 import { extrairPreco, precoDoHtml, resolverPreco } from '../src/midia/preco.js';
 import { tituloDaPagina } from '../src/linkResolver.js';
@@ -124,4 +125,18 @@ test('CA-2: API vence a página, a página vence o texto', () => {
     149.9,
     'API vence a página',
   );
+});
+
+test('CA-2: o bloco de preço roda DEPOIS de `mensagemFinal` existir', () => {
+  // Regressão real (27/11): o bloco de preço entrou ANTES da declaração de
+  // `mensagemFinal` (const) e toda oferta quebrava com TDZ —
+  // "Cannot access 'mensagemFinal' before initialization". `node --check` não
+  // pega isso, e `app.js` não é importável (boota o app no import), então a
+  // ordem é conferida no texto do próprio pipeline.
+  const app = fs.readFileSync(new URL('../src/app.js', import.meta.url), 'utf8');
+  const declaracao = app.indexOf('let mensagemFinal');
+  const uso = app.indexOf('resolverPreco({');
+
+  assert.ok(declaracao > 0, 'mensagemFinal precisa ser declarada no pipeline');
+  assert.ok(uso > declaracao, 'resolverPreco deve vir depois de mensagemFinal');
 });

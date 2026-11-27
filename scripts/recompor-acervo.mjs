@@ -15,13 +15,15 @@
  *   npm run recompor             # aplica
  *   npm run recompor -- --seco   # só relata
  */
+import fs from 'node:fs';
+import path from 'node:path';
 import Database from 'better-sqlite3';
 
 import config from '../src/config.js';
 import { precoPelaApiDaLoja } from '../src/lojaApi.js';
 import { chaveProduto } from '../src/affiliates/index.js';
 import { resolverPreco } from '../src/midia/preco.js';
-import { carregarAcervo } from '../src/midia/acervo.js';
+import { caminhoAcervo, carregarAcervo } from '../src/midia/acervo.js';
 import { chaveSegura, registrarOferta } from '../src/oferta.js';
 
 const seco = process.argv.includes('--seco');
@@ -112,6 +114,30 @@ if (!seco) {
     );
     for (const chave of legado) {
       console.log(`     ${chave} · R$ ${acervo[chave].preco} · ${acervo[chave].titulo || '-'}`);
+    }
+
+    // Quarentena: tira do acervo ATIVO (é o que a publicação automática lê) sem
+    // perder nada — o arquivo com as entradas antigas fica em `acervo-legado.json`.
+    if (process.argv.includes('--quarentena')) {
+      const ativo = { ...acervo };
+      const quarentena = {};
+      for (const chave of legado) {
+        quarentena[chave] = ativo[chave];
+        delete ativo[chave];
+      }
+      fs.writeFileSync(
+        path.join(config.publicacao.midiaDir, 'acervo-legado.json'),
+        `${JSON.stringify(quarentena, null, 2)}\n`,
+      );
+      fs.writeFileSync(
+        caminhoAcervo(config.publicacao.midiaDir),
+        `${JSON.stringify(ativo, null, 2)}\n`,
+      );
+      console.log(
+        `\n🧹 ${legado.length} story(s) movidos para acervo-legado.json — fora da fila de publicação.`,
+      );
+    } else {
+      console.log('\n   (use --quarentena para tirá-los do acervo ativo)');
     }
   }
 }
