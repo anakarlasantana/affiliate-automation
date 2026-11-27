@@ -144,6 +144,7 @@ test('argv do story monta 9:16 com faixa de preço e CTA', () => {
   assert.ok(linha.includes('drawbox='), 'faixa de preço');
   assert.ok(linha.includes('R$ 199'), 'preço no criativo');
   assert.ok(linha.includes('de R$ 299'), '"de" preservado');
+  assert.ok(linha.includes('expansion=none'), 'sem expansion=none o % faz o texto sumir');
   assert.ok(args.includes('-frames:v'), 'saída é imagem única');
   assert.equal(args.at(-1), 'story.jpg');
 });

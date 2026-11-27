@@ -86,7 +86,7 @@ export function montarArgsStory({
 
   const desenhar = (txt, tamanho, cor, y) =>
     `drawtext=fontfile=${escaparDrawtext(fonte)}:text='${escaparDrawtext(txt)}'` +
-    `:fontcolor=${cor}:fontsize=${tamanho}:x=(w-text_w)/2:y=${y}`;
+    `:fontcolor=${cor}:fontsize=${tamanho}:x=(w-text_w)/2:y=${y}:expansion=none`;
 
   const filtros = [
     `scale=${largura}:${altura}:force_original_aspect_ratio=increase`,

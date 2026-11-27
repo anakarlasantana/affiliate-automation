@@ -1,0 +1,11 @@
+{
+  "versao": 1,
+  "base": "story-base.png",
+  "largura": 1080,
+  "altura": 1920,
+  "foto": { "x": 140, "y": 570, "w": 818, "h": 698, "fit": "contain", "escalaMax": 1 },
+  "titulo": { "x": 150, "y": 1330, "maxLargura": 780, "tamanho": 40, "linhas": 2, "cor": "#FFFFFF" },
+  "preco": { "x": 150, "y": 1430, "tamanho": 108, "cor": "#FFFFFF", "contorno": 3 },
+  "precoDe": { "x": 150, "y": 1555, "tamanho": 42, "cor": "white@0.85" },
+  "cta": { "x": 540, "y": 1685, "tamanho": 58, "cor": "#101828", "ancora": "centro" }
+}

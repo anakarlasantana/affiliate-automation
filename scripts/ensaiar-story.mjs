@@ -29,6 +29,8 @@ import {
 } from '../src/affiliates/index.js';
 import { comporStory, textosDoStory } from '../src/midia/compor.js';
 import { nomeDaMidia } from '../src/midia/quadro.js';
+import { carregarLayout, comporComTemplate } from '../src/midia/layout.js';
+import { dimensoesImagem } from '../src/imagem.js';
 import { registrarDestino } from '../src/redirecionador.js';
 import { registrarNoAcervo } from '../src/midia/acervo.js';
 
@@ -102,7 +104,25 @@ fs.writeFileSync(origem, buffer);
 const nomeSaida = nomeDaMidia(buffer);
 const saida = path.join(pasta, nomeSaida);
 
-await comporStory({ entrada: origem, saida, textos });
+// Com o template da marca presente, compõe por cima da arte; senão, layout embutido.
+const layout = carregarLayout(path.join(config.caminhos.root, 'assets/template/story.json'));
+const baseTemplate = path.join(config.caminhos.root, 'assets/template/story-base.png');
+const dimensoes = dimensoesImagem(buffer);
+
+let layoutUsado = 'embutido';
+if (layout && fs.existsSync(baseTemplate) && dimensoes) {
+  await comporComTemplate({
+    base: baseTemplate,
+    foto: origem,
+    dimensoesFoto: dimensoes,
+    layout,
+    textos: { titulo: '', preco: textos.preco, de: textos.de, principal: textos.principal },
+    saida,
+  });
+  layoutUsado = 'template';
+} else {
+  await comporStory({ entrada: origem, saida, textos });
+}
 fs.rmSync(origem, { force: true });
 
 const base = config.publicacao.baseUrl || `http://127.0.0.1:${config.publicacao.porta}`;
@@ -122,6 +142,7 @@ const acervo = registrarNoAcervo(pasta, chaveUrl, {
 });
 
 console.log(`imagem     : ${imagem.origem} (${Math.round(buffer.length / 1024)} KB)`);
+console.log(`layout     : ${layoutUsado}`);
 console.log(`story gerado: ${saida}`);
 console.log(`URL p/ Meta : ${base}/midia/${nomeSaida}`);
 console.log(`link curto  : ${curto}`);

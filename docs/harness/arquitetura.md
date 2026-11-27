@@ -79,6 +79,8 @@ Módulos de lógica **pura** criados com as specs de Instagram (sem rede, sem to
 | `scripts/verificar-ig.mjs` | checagem read-only de token/quota (`npm run verify:ig`) |
 | `src/midia/acervo.js` | índice `chave → arquivo/link/preço` (`data/midia/acervo.json`) |
 | `src/canais/publicacao.js` | guardas de publicação + legenda + quota → `npm run publicar` |
+| `src/midia/layout.js` | composição sobre o template da marca (zonas, normalização, contain) |
+| `assets/template/` | `story-base.png` (1080×1920) + `story.json` com as zonas medidas |
 
 **Ainda depende de credencial/infra** (não testável offline): publicar de verdade no Instagram
 (`IG_USER_ID` + `IG_ACCESS_TOKEN` e domínio público), validar a galeria do Mercado Livre (OAuth) e
