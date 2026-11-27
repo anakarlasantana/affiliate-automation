@@ -100,3 +100,27 @@ export function contarPublicacoesDoDia(midiaDir, desde) {
     return Number.isFinite(t) && t >= base;
   }).length;
 }
+
+/**
+ * Chave do story publicado mais recentemente — é para ela que o link da bio
+ * (`GET /go`) aponta.
+ *
+ * Só considera `publicadoEm`: apontar para um story composto mas NÃO publicado
+ * levaria o seguidor a um produto que ele nunca viu. Sem nenhum publicado,
+ * devolve null e o servidor responde 404 (nunca cai no grupo por engano).
+ */
+export function chavePublicadaRecente(midiaDir) {
+  let melhor = null;
+  let melhorQuando = -Infinity;
+
+  for (const [chave, registro] of Object.entries(carregarAcervo(midiaDir))) {
+    const t = Date.parse(registro?.publicadoEm || '');
+    if (!Number.isFinite(t)) continue;
+    if (t > melhorQuando) {
+      melhorQuando = t;
+      melhor = chave;
+    }
+  }
+
+  return melhor;
+}

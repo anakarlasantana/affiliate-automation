@@ -159,3 +159,11 @@ test('composição recusa entrada/saída/preço ausentes', () => {
 test('escape do drawtext protege separadores do filtro', () => {
   assert.equal(escaparDrawtext("a:b,c%d'e"), "a\\:b\\,c\\%d\\'e");
 });
+
+test('FEAT-011 CA-5: destino "oferta" usa o CTA LINK NA BIO', () => {
+  const preco = { atual: 239, antigo: 299, desconto: 20 };
+  const oferta = textosDoStory(preco, 'oferta');
+  assert.equal(oferta.principal, 'LINK NA BIO');
+  assert.equal(oferta.apoio, 'oferta do dia');
+  assert.notEqual(textosDoStory(preco, 'grupo').principal, 'LINK NA BIO');
+});

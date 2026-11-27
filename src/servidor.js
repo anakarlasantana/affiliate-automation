@@ -15,6 +15,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import config from './config.js';
+import { chavePublicadaRecente } from './midia/acervo.js';
 
 import {
   carregarDestinos,
@@ -283,6 +284,9 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
       destinos,
       respondidos,
       enviarDirect,
+      // Link da bio (`GET /go` sem chave) → story publicado mais recentemente.
+      // Lê o acervo a CADA request: o story pode ser publicado depois do boot.
+      obterChaveAtual: () => chavePublicadaRecente(config.publicacao.midiaDir),
       aoMarcar: (mid, igsid) => marcarDirectRespondido(mid, igsid),
       avisar: (msg) => console.log(`   ${msg}`),
     }).listen(porta, () => {

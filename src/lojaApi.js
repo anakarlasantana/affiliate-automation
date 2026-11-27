@@ -116,6 +116,62 @@ export async function imagemPelaApiDaLoja(loja, chave) {
   }
 }
 
+/**
+ * Preço do produto pela API oficial da Shopee (GraphQL de afiliados).
+ *
+ * Mesma consulta da imagem, com os campos de preço: `priceMin` é o valor à vista
+ * e `priceMax` o "de" (quando há variação/riscado). Sem `shopId` batendo, o
+ * itemId apontou para outro produto e o preço não vale para esta oferta.
+ *
+ * @param {string} chave `shopee:<shopId>.<itemId>`
+ * @returns {Promise<{atual:number, antigo:number|null, desconto:number|null}|null>}
+ */
+export async function precoShopee(chave) {
+  const m = String(chave || '').match(/^shopee:(\d+)\.(\d+)$/);
+  if (!m) return null;
+  const [, shopId, itemId] = m;
+  const data = await shopeeGraphql(
+    `{productOfferV2(itemId:${itemId},limit:1){nodes{itemId shopId priceMin priceMax}}}`,
+  );
+  const no = data?.productOfferV2?.nodes?.[0];
+  if (!no || String(no.shopId) !== shopId) return null;
+
+  const atual = Number(no.priceMin ?? no.price);
+  if (!Number.isFinite(atual) || atual <= 0) return null;
+
+  const antigo = Number(no.priceMax);
+  const temDesconto = Number.isFinite(antigo) && antigo > atual;
+  return {
+    atual,
+    antigo: temDesconto ? antigo : null,
+    desconto: temDesconto ? Math.round((1 - atual / antigo) * 100) : null,
+  };
+}
+
+/** Fontes de preço por loja (hoje só a Shopee expõe preço na API). */
+const FONTES_PRECO = {
+  Shopee: precoShopee,
+};
+
+/**
+ * Preço do produto pela API oficial da loja, quando existir.
+ * Nunca lança: falha de API devolve null e o texto/HTML decide.
+ *
+ * @param {string} loja nome da loja (ex.: "Shopee", "MercadoLivre")
+ * @param {string} chave identidade do produto (saída de chaveProduto)
+ * @returns {Promise<{atual:number, antigo:number|null, desconto:number|null}|null>}
+ */
+export async function precoPelaApiDaLoja(loja, chave) {
+  const fonte = FONTES_PRECO[loja];
+  if (!fonte) return null;
+  try {
+    return await fonte(chave);
+  } catch (erro) {
+    console.warn(`   ⚠️  Falha na API de preço [${loja}]: ${erro.message}`);
+    return null;
+  }
+}
+
 /** Lojas que têm fonte de imagem por API (para o painel/doctor). */
 export function lojasComApiDeImagem() {
   return Object.keys(FONTES);

@@ -12,6 +12,11 @@ import os from 'node:os';
 import path from 'node:path';
 
 import { criarServidor, linkCurto, nomeSeguro } from '../src/servidor.js';
+import {
+  chavePublicadaRecente,
+  marcarPublicado,
+  registrarNoAcervo,
+} from '../src/midia/acervo.js';
 
 const SEGREDO = 'segredo-de-teste';
 const DESTINO = 'https://produto.mercadolivre.com.br/MLB-4161352905-_JM?matt_tool=20619494';
@@ -61,6 +66,7 @@ async function comServidor(executar, opcoes = {}) {
   const cfg = configDeTeste(midiaDir);
 
   if (opcoes.diretoAtivo !== undefined) cfg.publicacao.diretoAtivo = opcoes.diretoAtivo;
+  if (opcoes.goDestino !== undefined) cfg.publicacao.goDestino = opcoes.goDestino;
 
   const servidor = criarServidor({
     config: cfg,
@@ -68,7 +74,10 @@ async function comServidor(executar, opcoes = {}) {
     cliques,
     respondidos,
     enviarDirect: async (msg) => enviados.push(msg),
-    obterChaveAtual: () => 'MLB4161352905',
+    obterChaveAtual:
+      opcoes.obterChaveAtual !== undefined
+        ? opcoes.obterChaveAtual
+        : () => 'MLB4161352905',
   });
 
   await new Promise((r) => servidor.listen(0, '127.0.0.1', r));
@@ -269,3 +278,42 @@ test('linkCurto e nomeSeguro protegem o básico', () => {
   assert.equal(nomeSeguro('a b.jpg'), null, 'espaço é recusado');
 });
 
+
+test('FEAT-011 CA-6: modo "oferta" — /go vai para a oferta publicada', async () => {
+  await comServidor(
+    async ({ porta }) => {
+      const r = await pedir(porta, { caminho: '/go' });
+      assert.equal(r.status, 302);
+      assert.equal(r.headers.location, DESTINO);
+    },
+    { goDestino: 'oferta', obterChaveAtual: () => 'MLB4161352905' },
+  );
+});
+
+test('FEAT-011 CA-6: sem oferta publicada — /go responde 404 (nunca o grupo)', async () => {
+  await comServidor(
+    async ({ porta }) => {
+      const r = await pedir(porta, { caminho: '/go' });
+      assert.equal(r.status, 404);
+      assert.equal(r.headers.location, undefined);
+    },
+    { goDestino: 'oferta', obterChaveAtual: () => null },
+  );
+});
+
+test('FEAT-011 CA-6: chavePublicadaRecente ignora composto não publicado', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'acervo-feat011-'));
+  try {
+    registrarNoAcervo(dir, 'a', { arquivo: 'a.jpg', preco: 10 });
+    registrarNoAcervo(dir, 'b', { arquivo: 'b.jpg', preco: 20 });
+    assert.equal(chavePublicadaRecente(dir), null);
+
+    marcarPublicado(dir, 'a', { mediaId: '1', quando: '2026-11-27T19:00:00.000Z' });
+    assert.equal(chavePublicadaRecente(dir), 'a');
+
+    marcarPublicado(dir, 'b', { mediaId: '2', quando: '2026-11-27T20:00:00.000Z' });
+    assert.equal(chavePublicadaRecente(dir), 'b');
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});

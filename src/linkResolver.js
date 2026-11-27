@@ -335,6 +335,26 @@ function decodificarEntidades(texto) {
   return String(texto || '').replace(/&(amp|quot|#39|apos|lt|gt|nbsp);/g, (m) => mapa[m] || m);
 }
 
+/**
+ * Título da página do produto: `og:title`, senão `<title>`.
+ *
+ * POR QUÊ exportado: o criativo do story usa o NOME DO PRODUTO, não a manchete
+ * da mensagem (`*NOVOS CUPONS NO ML*`). Sai do MESMO HTML já baixado para a
+ * imagem — nenhum request extra.
+ * @param {string} html
+ * @returns {string} título limpo ('' quando a página não tem)
+ */
+export function tituloDaPagina(html) {
+  const bruto = String(html || '');
+  const achado =
+    bruto.match(
+      /<meta[^>]+(?:property|name)=["']og:title["'][^>]+content=["']([^"']+)["']/i,
+    ) ||
+    bruto.match(/<title[^>]*>([^<]{1,200})<\/title>/i) ||
+    [];
+  return decodificarEntidades(achado[1] || '').trim();
+}
+
 export async function extrairImagemProduto(urlProduto) {
   return extrairImagemDaPagina(urlProduto, { permitirGaleria: false });
 }
@@ -522,13 +542,7 @@ async function extrairImagemDaPagina(urlProduto, { permitirGaleria }) {
      * Título da página (og:title, senão <title>) — vai para o criativo do story.
      * Sai do MESMO HTML já baixado para a imagem: nenhum request extra.
      */
-    const tituloPagina = decodificarEntidades(
-      (
-        html.match(/<meta[^>]+(?:property|name)=["']og:title["'][^>]+content=["']([^"']+)["']/i) ||
-        html.match(/<title[^>]*>([^<]{1,200})<\/title>/i) ||
-        []
-      )[1] || '',
-    ).trim();
+    const tituloPagina = tituloDaPagina(html);
 
     /** Absolutiza a URL, baixa (com upgrade) e registra a origem. */
     const tentar = async (url, rotulo) => {

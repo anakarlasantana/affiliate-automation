@@ -27,8 +27,42 @@ export function formatarBRL(valor) {
 
 const RE_DE_POR = /de\s*R\$\s*([\d.,]+)\s*por\s*R\$\s*([\d.,]+)/i;
 const RE_POR = /por\s*R\$\s*([\d.,]+)/i;
-const RE_QUALQUER = /R\$\s*([\d.,]+)/i;
+const RE_MOEDA = /R\$\s*([\d.,]+)/g;
 const RE_PARCELA = /\d{1,2}\s*x\s*(?:de\s*)?R\$\s*[\d.,]+/gi;
+
+/**
+ * O valor achado é desconto/cupom em vez de preço do produto?
+ *
+ * POR QUÊ: oferta de grupo vive de cupom — `R$ 300 OFF acima de R$ 1.999` — e o
+ * parser antigo pegava o PRIMEIRO "R$ N" (300). Story com preço de cupom anuncia
+ * um valor que não existe: derruba a confiança e a conversão.
+ */
+function valorDeDesconto(texto, indice, tamanho) {
+  const antes = texto.slice(Math.max(0, indice - 48), indice).toLowerCase();
+  const depois = texto
+    .slice(indice + tamanho, indice + tamanho + 24)
+    .toLowerCase();
+  // O "R$ " cola no número: sem tirá-lo, "acima de R$ 1.999" não era
+  // reconhecido como desconto. O "de" de "cupom de" fica no próprio padrão
+  // (senão "acima de" perderia o "de" que o identifica).
+  const antesLimpo = antes.replace(/r\$\s*$/, '').trimEnd();
+  const marcaAntes =
+    /(?:off|cupom|desconto|desc\.?|economize|economia|no m[ií]nimo|acima\s+de)(?:\s+de)?\s*$/.test(
+      antesLimpo,
+    );
+  const marcaDepois = /^\s*(?:off|de\s+desconto|reais\s+off)\b/.test(depois);
+  return marcaAntes || marcaDepois;
+}
+
+/** Monta o resultado, guardando o "de" só quando for maior que o "por". */
+function comDesconto(atual, antigo) {
+  const temDesconto = Number.isFinite(antigo) && antigo > atual;
+  return {
+    atual,
+    antigo: temDesconto ? antigo : null,
+    desconto: temDesconto ? Math.round((1 - atual / antigo) * 100) : null,
+  };
+}
 
 /**
  * @param {string} texto mensagem ouvida
@@ -41,27 +75,34 @@ export function extrairPreco(texto) {
   // Parcelamento não é preço do produto: remove antes de procurar.
   const limpo = bruto.replace(RE_PARCELA, ' ');
 
-  let antigo = null;
-  let atual = null;
-
   const dePor = RE_DE_POR.exec(limpo);
   if (dePor) {
-    antigo = numero(dePor[1]);
-    atual = numero(dePor[2]);
-  } else {
-    const por = RE_POR.exec(limpo);
-    const qualquer = por || RE_QUALQUER.exec(limpo);
-    if (qualquer) atual = numero(qualquer[1]);
+    const antigo = numero(dePor[1]);
+    const atual = numero(dePor[2]);
+    if (Number.isFinite(atual) && atual > 0) return comDesconto(atual, antigo);
   }
 
-  if (!Number.isFinite(atual) || atual <= 0) return null;
+  // "por R$ X" é o sinal mais forte de preço de venda — se X não for cupom.
+  const por = RE_POR.exec(limpo);
+  if (por) {
+    const indice = por.index + por[0].lastIndexOf(por[1]);
+    if (!valorDeDesconto(limpo, indice, por[1].length)) {
+      const atual = numero(por[1]);
+      if (Number.isFinite(atual) && atual > 0) return comDesconto(atual, null);
+    }
+  }
 
-  const temDesconto = Number.isFinite(antigo) && antigo > atual;
-  return {
-    atual,
-    antigo: temDesconto ? antigo : null,
-    desconto: temDesconto ? Math.round((1 - atual / antigo) * 100) : null,
-  };
+  // Último recurso: o primeiro "R$ N" que NÃO seja valor de desconto/cupom.
+  RE_MOEDA.lastIndex = 0;
+  let achado;
+  while ((achado = RE_MOEDA.exec(limpo)) !== null) {
+    const indice = achado.index + achado[0].lastIndexOf(achado[1]);
+    if (valorDeDesconto(limpo, indice, achado[1].length)) continue;
+    const atual = numero(achado[1]);
+    if (Number.isFinite(atual) && atual > 0) return comDesconto(atual, null);
+  }
+
+  return null;
 }
 
 /**
@@ -82,4 +123,57 @@ export function escolherPreco(daApi, doTexto) {
     antigo,
     desconto: antigo ? Math.round((1 - daApi.atual / antigo) * 100) : null,
   };
+}
+
+/**
+ * Número vindo de HTML/API (formato internacional): `199.90`, `1699.90`, `1.999`.
+ *
+ * Não usa `numero()` porque ele assume pt-BR ('.' = milhar). Em `og:price` o
+ * ponto é decimal; em `1.999` é milhar. O padrão de 3 dígitos após o ponto é o
+ * que separa os dois casos.
+ */
+function numeroFlex(bruto) {
+  const s = String(bruto || '').replace(/[^\d.,]/g, '');
+  if (!s) return null;
+  if (s.includes(',')) return numero(s);
+  if (/^\d{1,3}(\.\d{3})+$/.test(s)) return numero(s);
+  const n = Number.parseFloat(s);
+  return Number.isFinite(n) ? n : null;
+}
+
+const RE_META_PRECO =
+  /<meta[^>]+(?:property|name)=["'](?:og:price:amount|product:price:amount)["'][^>]+content=["']([\d.,]+)/i;
+const RE_JSONLD_PRECO = /"(?:price|lowPrice)"\s*:\s*"?(\d+(?:[.,]\d{1,2})?)"?/i;
+
+/**
+ * Preço lido do HTML JÁ baixado (nenhum request extra): `og:price:amount` ou
+ * JSON-LD `"price"`.
+ *
+ * Devolve null quando a página não expõe preço — é o caso do Mercado Livre, que
+ * serve captcha para requisição sem navegador (medido em 27/11/2026: três URLs
+ * diferentes, 42.822 bytes idênticos, sem nenhuma meta og:price).
+ */
+export function precoDoHtml(html) {
+  const bruto = String(html || '');
+  if (!bruto) return null;
+
+  const meta = RE_META_PRECO.exec(bruto);
+  const json = meta ? null : RE_JSONLD_PRECO.exec(bruto);
+  const valor = numeroFlex(meta?.[1] ?? json?.[1]);
+  if (!Number.isFinite(valor) || valor <= 0) return null;
+  return { atual: valor, antigo: null, desconto: null };
+}
+
+/**
+ * Preço final do story: a ORIGEM (API/HTML) vence e o texto só entra quando ela
+ * não respondeu. Valor de cupom no texto nunca vira preço.
+ *
+ * Um único ponto de decisão — é o que o pipeline chama, para que o `escolherPreco`
+ * deixe de ser código morto e a regra não se espalhe por `app.js`.
+ *
+ * @param {{texto?:string, daApi?:{atual:number}|null, html?:string}} [fontes]
+ */
+export function resolverPreco({ texto, daApi = null, html = '' } = {}) {
+  const daOrigem = Number.isFinite(daApi?.atual) ? daApi : precoDoHtml(html);
+  return escolherPreco(daOrigem, extrairPreco(texto));
 }
