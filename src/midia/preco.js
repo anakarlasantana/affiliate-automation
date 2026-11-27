@@ -165,15 +165,24 @@ export function precoDoHtml(html) {
 }
 
 /**
- * Preço final do story: a ORIGEM (API/HTML) vence e o texto só entra quando ela
- * não respondeu. Valor de cupom no texto nunca vira preço.
+ * Preço final do story: a ORIGEM vence e o texto só entra quando ela não
+ * respondeu. Ordem: API da loja → página (`og:price`/JSON-LD) → texto.
  *
  * Um único ponto de decisão — é o que o pipeline chama, para que o `escolherPreco`
  * deixe de ser código morto e a regra não se espalhe por `app.js`.
  *
- * @param {{texto?:string, daApi?:{atual:number}|null, html?:string}} [fontes]
+ * @param {{texto?:string, daApi?:{atual:number}|null, daPagina?:{atual:number}|null, html?:string}} [fontes]
  */
-export function resolverPreco({ texto, daApi = null, html = '' } = {}) {
-  const daOrigem = Number.isFinite(daApi?.atual) ? daApi : precoDoHtml(html);
+export function resolverPreco({
+  texto,
+  daApi = null,
+  daPagina = null,
+  html = '',
+} = {}) {
+  const daOrigem = Number.isFinite(daApi?.atual)
+    ? daApi
+    : Number.isFinite(daPagina?.atual)
+      ? daPagina
+      : precoDoHtml(html);
   return escolherPreco(daOrigem, extrairPreco(texto));
 }

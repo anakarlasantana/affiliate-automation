@@ -111,3 +111,17 @@ test('CA-4: sem og:title cai no <title>', () => {
   );
   assert.equal(tituloDaPagina('<html></html>'), '');
 });
+
+test('CA-2: API vence a página, a página vence o texto', () => {
+  const daPagina = { atual: 179.9, antigo: null, desconto: null };
+  assert.equal(
+    resolverPreco({ texto: 'por R$ 199,90', daPagina }).atual,
+    179.9,
+    'página vence o texto',
+  );
+  assert.equal(
+    resolverPreco({ texto: 'por R$ 199,90', daApi: { atual: 149.9 }, daPagina }).atual,
+    149.9,
+    'API vence a página',
+  );
+});

@@ -4,6 +4,7 @@
  * de parâmetros de afiliados concorrentes.
  */
 import axios from 'axios';
+import { precoDoHtml } from './midia/preco.js';
 
 const USER_AGENT =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 ' +
@@ -556,7 +557,14 @@ async function extrairImagemDaPagina(urlProduto, { permitirGaleria }) {
       console.log(
         `   🖼️  Foto do produto [${final}] (${Math.round(baixada.bytes / 1024)} KB) — ${alvo.slice(0, 76)}`,
       );
-      return { base64: baixada.dataUrl, origem: final, titulo: tituloPagina };
+      // `preco` sai do MESMO HTML já baixado (nenhum request extra): é a fonte
+      // preferida do story, acima do texto da mensagem (FEAT-011 CA-1).
+      return {
+        base64: baixada.dataUrl,
+        origem: final,
+        titulo: tituloPagina,
+        preco: precoDoHtml(html),
+      };
     };
 
     if (urlImagem) {

@@ -36,7 +36,10 @@ import {
   extrairImagemDaLoja,
   extrairImagemDeUrl,
 } from "./linkResolver.js";
-import { imagemPelaApiDaLoja } from "./lojaApi.js";
+import {
+  imagemPelaApiDaLoja,
+  precoPelaApiDaLoja,
+} from "./lojaApi.js";
 import {
   baixarMidiaComRetry,
   placeholderPara,
@@ -65,7 +68,7 @@ import {
   liberarTrava,
   processosDoApp,
 } from "./instancia.js";
-import { extrairPreco } from "./midia/preco.js";
+import { resolverPreco } from "./midia/preco.js";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -302,6 +305,8 @@ async function processarOferta(
     // (mensagem:body | mensagem:download | mensagem:miniatura) — assim o
     // `npm run status` mostra na hora se alguma oferta saiu degradada.
     let origemFoto = imagemBase64 ? origemFotoMidia || "mensagem" : null;
+    /** Resposta do site: traz `titulo` e `preco` lidos da própria página. */
+    let pagina = null;
     if (imagemBase64 && origemSoFotoSite(origem)) {
       console.log(
         `   🖼️  [${origem}] foto da mensagem ignorada por regra (FONTES_FOTO_SOMENTE_SITE) — buscando no site do produto.`,
@@ -344,6 +349,7 @@ async function processarOferta(
             if (v.valido) {
               imagemBase64 = doSite.base64;
               origemFoto = doSite.origem || "site";
+              pagina = doSite;
               console.log(
                 `   🖼️  Foto do produto [${origemFoto}] obtida do site (${v.kb} KB, URL ${rotulo}).`,
               );
@@ -387,6 +393,7 @@ async function processarOferta(
           if (v.valido) {
             imagemBase64 = doSite.base64;
             origemFoto = doSite.origem || "site";
+            pagina = doSite;
             console.log(
               `   🖼️  Foto [${origemFoto}] via ${rotulo} (${v.kb} KB).`,
             );
@@ -402,6 +409,25 @@ async function processarOferta(
       origemFoto = ph.origem;
       console.log(
         `   🖼️  Placeholder [${loja}] aplicado — oferta mantida com foto generica.`,
+      );
+    }
+
+    // Preço e título vêm do PRODUTO, não da manchete da mensagem (FEAT-011):
+    // API da loja vence, depois a página (og:price/og:title do HTML já baixado)
+    // e o texto só entra quando nada disso respondeu. Cupom nunca vira preço.
+    const chaveAcervo = chaveProduto(urlLimpa) || chaveProduto(meuLink || "");
+    const precoResolvido = resolverPreco({
+      texto: mensagemFinal,
+      daApi: await precoPelaApiDaLoja(loja, chaveAcervo),
+      daPagina: pagina?.preco || null,
+    });
+    /** Nome do produto para o criativo: og:title, senão a 1ª linha da mensagem. */
+    const tituloProduto = pagina?.titulo || primeiraLinha;
+    if (precoResolvido) {
+      console.log(
+        `   💰 Preço do story: ${precoResolvido.atual}` +
+          `${precoResolvido.antigo ? ` (de ${precoResolvido.antigo})` : ""}` +
+          ` · fonte: ${pagina?.preco ? "página" : "texto/API"}`,
       );
     }
 
@@ -479,12 +505,11 @@ async function processarOferta(
     // Registra a oferta para o Instagram (FEAT-009): link curto sempre, mídia
     // composta só com foto real. Falha aqui NUNCA derruba o envio no WhatsApp.
     try {
-      const chaveAcervo = chaveProduto(urlLimpa) || chaveProduto(meuLink || '');
       const registro = await registrarOferta({
         chave: chaveAcervo,
         link: meuLink,
-        preco: extrairPreco(mensagemFinal)?.atual,
-        titulo: primeiraLinha,
+        preco: precoResolvido?.atual ?? null,
+        titulo: tituloProduto,
         imagemBase64,
         placeholder: origemFoto === 'placeholder',
       });
