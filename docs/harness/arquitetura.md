@@ -81,6 +81,8 @@ Módulos de lógica **pura** criados com as specs de Instagram (sem rede, sem to
 | `src/canais/publicacao.js` | guardas de publicação + legenda + quota → `npm run publicar` |
 | `src/midia/layout.js` | composição sobre o template da marca (zonas, normalização, contain) |
 | `assets/template/` | `story-base.png` (1080×1920) + `story.json` com as zonas medidas |
+| `src/oferta.js` | ponto único do pipeline: grava destino sempre e mídia composta só com foto real (FEAT-009) |
+| `src/instancia.js` | trava do perfil do Chrome (uma instância), janela do QR sem TTY e decisão de encerrar no `browserClose` (FEAT-010) |
 
 **Ainda depende de credencial/infra** (não testável offline): publicar de verdade no Instagram
 (`IG_USER_ID` + `IG_ACCESS_TOKEN` e domínio público), validar a galeria do Mercado Livre (OAuth) e

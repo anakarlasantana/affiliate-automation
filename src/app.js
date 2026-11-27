@@ -58,6 +58,13 @@ import {
 } from "./affiliates/index.js";
 import { SendQueue } from "./sendQueue.js";
 import { registrarOferta } from "./oferta.js";
+import {
+  adquirirTrava,
+  deveEncerrarPorStatus,
+  janelaQrMs,
+  liberarTrava,
+  processosDoApp,
+} from "./instancia.js";
 import { extrairPreco } from "./midia/preco.js";
 import fs from "node:fs";
 import os from "node:os";
@@ -687,6 +694,9 @@ function limparRestosChrome() {
 }
 
 /** Status do wppconnect traduzido para o que significa na prática. */
+/** Marca se a sessão chegou a conectar — separa "falhou no boot" de "caiu depois". */
+let whatsappConectado = false;
+
 function traduzirStatus(status) {
   const mapa = {
     notLogged:
@@ -741,8 +751,15 @@ async function criarClienteWhatsApp(chave) {
       protocolTimeout: 120000,
       ...(chrome ? { executablePath: chrome.caminho } : {}),
     },
-    catchQR: (_qr, _ascii, tentativa) => {
+    catchQR: (_qr, ascii, tentativa) => {
       chave.pediuQR = true;
+      // Headless: além do terminal, o QR vai para arquivo. Sem isso, quando o
+      // stdout é um log (systemd, nohup, CI) não há como escanear o código.
+      try {
+        fs.writeFileSync(path.join(TOKENS_DIR, 'qr-ascii.txt'), ascii);
+      } catch {
+        // o QR no terminal continua valendo
+      }
       console.log(
         "\n📱 ESCANEIE O QR CODE ACIMA — WhatsApp > Dispositivos conectados > Conectar dispositivo" +
           `\n   (QR nº ${tentativa}; expira em ${Math.round(chave.autoCloseMs / 1000)}s)\n`,
@@ -751,6 +768,19 @@ async function criarClienteWhatsApp(chave) {
     statusFind: (status) => {
       if (status === "notLogged") chave.pediuQR = true;
       console.log(`   ${traduzirStatus(status)}`);
+      // Depois de conectado, ficar sem navegador é estado terminal: o app vive,
+      // falha em toda chamada e o supervisor nunca religa (fica `active` sem
+      // fazer nada). Antes de conectar, a queda é do ciclo normal de tentativas.
+      const encerramento = deveEncerrarPorStatus({
+        status,
+        jaConectou: whatsappConectado,
+      });
+      if (encerramento) {
+        console.error(
+          `⛔ ${encerramento.motivo} com a sessão ativa — encerrando em 2s para o supervisor religar.`,
+        );
+        setTimeout(() => process.exit(1), 2000);
+      }
     },
   });
 }
@@ -758,9 +788,13 @@ async function criarClienteWhatsApp(chave) {
 /** Conecta com N tentativas e limpeza entre elas. Erro carrega {pediuQR}. */
 async function conectarWhatsAppComRetry() {
   const tentativas = config.whatsapp.tentativas;
-  // Sem terminal não há quem escaneie o QR: janela curta só para falhar rápido
-  // (o passo a passo do QR é impresso no bloco final de orientação).
-  const autoCloseMs = process.stdin.isTTY ? config.whatsapp.timeoutQrMs : 60000;
+  // Sem terminal não há quem escaneie na hora: a janela vem de
+  // WPP_QR_HEADLESS_SEG (default 5 min) e o QR fica em tokens/qr-ascii.txt.
+  const autoCloseMs = janelaQrMs({
+    ehTTY: process.stdin.isTTY,
+    timeoutQrMs: config.whatsapp.timeoutQrMs,
+    headlessSeg: process.env.WPP_QR_HEADLESS_SEG,
+  });
   const esperas = [30, 90];
   let pediuQR = false;
   let ultimoErro = null;
@@ -772,6 +806,7 @@ async function conectarWhatsAppComRetry() {
       const client = await criarClienteWhatsApp(chave);
       pediuQR = pediuQR || chave.pediuQR;
       console.log(`✅ WhatsApp conectado na tentativa ${i}/${tentativas}.`);
+      whatsappConectado = true;
       return { client, pediuQR };
     } catch (erro) {
       ultimoErro = erro;
@@ -1525,6 +1560,21 @@ async function main() {
   const arquivoLog = espelharLogsEmArquivo();
   console.log("🚀 Iniciando Affiliate Automation...\n");
   if (arquivoLog) console.log(`🗒️  Logs em ${arquivoLog}`);
+
+  // Uma instância por perfil: dois Chromes no mesmo userDataDir fazem o
+  // WhatsApp Web ver dois navegadores no mesmo aparelho e derrubam a sessão
+  // (era a causa do ciclo "logado → QR de novo").
+  const trava = adquirirTrava({ diretorio: TOKENS_DIR });
+  if (!trava.ok) {
+    const quem = trava.pidDono ? ` (pid ${trava.pidDono})` : "";
+    console.error(
+      `⛔ Já existe uma instância usando este perfil do WhatsApp${quem} — ${trava.motivo}.\n` +
+        "   O perfil do Chrome é exclusivo: pare a outra (Ctrl+C / systemctl stop)\n" +
+        "   e rode de novo. Se ela morreu sem limpar: rm -f tokens/app.lock",
+    );
+    process.exit(1);
+  }
+
   painelLojas();
   if (config.whatsapp.diagMidia) {
     console.warn(
@@ -1648,6 +1698,8 @@ function encerrar(motivo, codigo = 0) {
     // cliente já morto
   }
   limparRestosChrome();
+  // Libera a trava mesmo em saída forçada: trava órfã bloquearia o próximo boot.
+  liberarTrava({ diretorio: TOKENS_DIR });
   setTimeout(() => process.exit(codigo), 1500).unref();
 }
 
@@ -1657,6 +1709,7 @@ for (const sinal of ["SIGINT", "SIGTERM", "SIGHUP"]) {
 process.on("uncaughtException", (erro) => {
   console.error(`💥 Exceção não tratada: ${erro?.message || erro}`);
   limparRestosChrome();
+  liberarTrava({ diretorio: TOKENS_DIR });
   process.exit(1);
 });
 process.on("unhandledRejection", (erro) => {
@@ -1674,20 +1727,6 @@ function extensaoDeFormato(formato) {
   if (formato === 'webp') return 'webp';
   if (formato === 'jpeg') return 'jpg';
   return 'bin';
-}
-
-/** Outro `src/app.js` já rodando? O perfil do Chrome é exclusivo (um por vez). */
-function outraInstanciaRodando() {
-  try {
-    const saida = execFileSync('ps', ['-eo', 'pid=,args='], { encoding: 'utf8', timeout: 10000 });
-    return saida
-      .split('\n')
-      .filter((linha) => linha.includes('src/app.js') && !linha.includes('--diag-midia'))
-      .map((linha) => linha.trim().split(/\s+/)[0])
-      .filter((pid) => Number(pid) && Number(pid) !== process.pid);
-  } catch {
-    return [];
-  }
 }
 
 /**
@@ -1711,7 +1750,7 @@ async function executarDiagnosticoMidia() {
   console.log('🔬 diag:midia — medindo as fotos já recebidas (nada é enviado)');
   if (arquivoLog) console.log(`🗒️  Logs em ${arquivoLog}`);
 
-  const conflito = outraInstanciaRodando();
+  const conflito = processosDoApp();
   if (conflito.length) {
     console.error(
       `⛔ Há outra instância do app rodando (pid ${conflito.join(', ')}) e o perfil do\n` +
@@ -1738,7 +1777,11 @@ async function executarDiagnosticoMidia() {
   let semMidia = 0;
   try {
     client = await criarClienteWhatsApp({
-      autoCloseMs: process.stdin.isTTY ? config.whatsapp.timeoutQrMs : 60000,
+      autoCloseMs: janelaQrMs({
+        ehTTY: process.stdin.isTTY,
+        timeoutQrMs: config.whatsapp.timeoutQrMs,
+        headlessSeg: process.env.WPP_QR_HEADLESS_SEG,
+      }),
       pediuQR: false,
     });
     console.log(`✅ Conectado. Varrendo as últimas ${limite} mensagens de cada grupo...\n`);
