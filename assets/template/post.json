@@ -1,0 +1,11 @@
+{
+  "versao": 1,
+  "base": "post-base.png",
+  "largura": 1080,
+  "altura": 1350,
+  "foto": { "x": 162, "y": 337, "w": 756, "h": 554, "fit": "contain", "escalaMax": 1 },
+  "titulo": { "x": 132, "y": 968, "maxLargura": 820, "tamanho": 30, "linhas": 2, "cor": "#FFFFFF" },
+  "preco": { "x": 132, "y": 1030, "tamanho": 64, "cor": "#FFD400", "contorno": 3 },
+  "precoDe": { "x": 132, "y": 1098, "tamanho": 26, "cor": "white@0.85" },
+  "cta": { "x": 540, "y": 1181, "tamanho": 48, "cor": "#101828", "ancora": "centro" }
+}
