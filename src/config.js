@@ -182,6 +182,16 @@ const config = {
     gruposMonitorados: lista(process.env.GRUPOS_WHATSAPP_MONITORADOS),
     /** Link de convite do SEU grupo (chat.whatsapp.com/...) — divulgado no rodape das ofertas */
     meuGrupoLink: process.env.MEU_GRUPO_LINK || '',
+    /**
+     * Convite do grupo na legenda do feed (FEAT-014).
+     *
+     * Liga por padrão e só aparece quando `GO_DESTINO` NÃO é `grupo` — se a bio
+     * já leva ao grupo, repetir o link é ruído. No Instagram ele não é clicável:
+     * serve para copiar/colar e para quem reposta.
+     */
+    feedConviteNaLegenda: /^(1|true|sim|on)$/i.test(
+      process.env.FEED_CONVITE_NA_LEGENDA ?? '1',
+    ),
     /** Nome da sessao = pasta dentro de tokens/ */
     sessao: process.env.WPP_SESSAO || 'affiliate-automation',
     /** Binario do Chrome/Chromium ('' = detecta automaticamente no boot) */

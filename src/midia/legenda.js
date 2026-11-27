@@ -179,10 +179,33 @@ export function extrairCupom(texto) {
 }
 
 /**
+ * Limpa o convite do grupo: tira o rastro de compartilhamento
+ * (`?s=cl&p=a&mlu=4&ilr=4`), que não muda o destino e só gasta caracteres.
+ * @param {string} url
+ * @returns {string} convite curto, ou '' quando não é um convite válido
+ */
+export function limparUrlDeConvite(url) {
+  const bruto = String(url || '').trim();
+  if (!bruto) return '';
+  try {
+    const u = new URL(bruto);
+    if (!/^https?:$/.test(u.protocol)) return '';
+    if (!/(^|\.)chat\.whatsapp\.com$/.test(u.hostname)) {
+      // Outro convidado (Telegram etc.) ainda vale: só remove a query.
+      return `${u.origin}${u.pathname}`;
+    }
+    return `${u.origin}${u.pathname}`;
+  } catch {
+    return '';
+  }
+}
+
+/**
  * A legenda do feed (CA-1..CA-8).
  *
  * @param {{titulo?:string, preco?:object|null, loja?:string, cupom?:object|null,
- *   goDestino?:string, texto?:string, extrasHashtags?:string[]}} [dados]
+ *   goDestino?:string, texto?:string, extrasHashtags?:string[],
+ *   convite?:string, incluirConvite?:boolean}} [dados]
  * @returns {string}
  */
 export function legendaDoFeed({
@@ -193,6 +216,8 @@ export function legendaDoFeed({
   goDestino = 'oferta',
   texto = '',
   extrasHashtags = [],
+  convite = '',
+  incluirConvite = true,
 } = {}) {
   const linhas = [gancho({ titulo, preco }), ''];
 
@@ -217,6 +242,14 @@ export function legendaDoFeed({
       ? '🔗 Link na bio → entra no grupo'
       : '🔗 Link na bio → abre a oferta',
   );
+
+  // O convite só entra quando a bio NÃO leva ao grupo — repetir seria ruído.
+  // No Instagram ele NÃO é clicável: serve para copiar/colar e para quem reposta.
+  const urlConvite = incluirConvite ? limparUrlDeConvite(convite) : '';
+  if (urlConvite && goDestino !== 'grupo') {
+    linhas.push(`👥 Grupo com todas as ofertas: ${urlConvite}`);
+  }
+
   linhas.push('⚠️ Preço e disponibilidade podem mudar.');
 
   const tags = montarHashtags({ loja, extras: extrasHashtags });

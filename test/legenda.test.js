@@ -14,10 +14,14 @@ import {
   extrairCupom,
   gancho,
   legendaDoFeed,
+  limparUrlDeConvite,
   linhaDoPreco,
   montarHashtags,
   truncarPorLinha,
 } from '../src/midia/legenda.js';
+
+const CONVITE =
+  'https://chat.whatsapp.com/LOnUJWU5MuDAziZhxVOPrS?s=cl&p=a&mlu=4&ilr=4';
 
 const TEXTO_GRUPO = `*MENOR PREÇO JÁ POSTADO NO MEDICUBE*
 
@@ -154,4 +158,47 @@ test('CA-1/CA-2/CA-4: legenda completa tem gancho, preço, loja e tags', () => {
   assert.match(l, /🏬 MercadoLivre/);
   assert.match(l, /#mercadolivre/);
   assert.ok(l.length <= LIMITE_LEGENDA);
+});
+
+test('CA-5: convite entra só quando a bio NÃO leva ao grupo', () => {
+  const oferta = legendaDoFeed({
+    titulo: 'Fone',
+    preco: PRECO,
+    goDestino: 'oferta',
+    convite: CONVITE,
+  });
+  assert.match(
+    oferta,
+    /👥 Grupo com todas as ofertas: https:\/\/chat\.whatsapp\.com\/LOnUJWU5MuDAziZhxVOPrS$/m,
+  );
+  assert.doesNotMatch(oferta, /\?s=cl/, 'rastro de compartilhamento não entra');
+
+  const grupo = legendaDoFeed({
+    titulo: 'Fone',
+    preco: PRECO,
+    goDestino: 'grupo',
+    convite: CONVITE,
+  });
+  assert.doesNotMatch(
+    grupo,
+    /👥 Grupo com todas/,
+    'não repete quando a bio já leva ao grupo',
+  );
+
+  const desligado = legendaDoFeed({
+    titulo: 'Fone',
+    preco: PRECO,
+    convite: CONVITE,
+    incluirConvite: false,
+  });
+  assert.doesNotMatch(desligado, /👥/);
+});
+
+test('CA-5: limparUrlDeConvite encurta e recusa lixo', () => {
+  assert.equal(
+    limparUrlDeConvite('https://chat.whatsapp.com/ABC123?s=cl&p=a'),
+    'https://chat.whatsapp.com/ABC123',
+  );
+  assert.equal(limparUrlDeConvite(''), '');
+  assert.equal(limparUrlDeConvite('nao-e-url'), '');
 });
