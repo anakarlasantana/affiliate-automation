@@ -412,24 +412,8 @@ async function processarOferta(
       );
     }
 
-    // Preço e título vêm do PRODUTO, não da manchete da mensagem (FEAT-011):
-    // API da loja vence, depois a página (og:price/og:title do HTML já baixado)
-    // e o texto só entra quando nada disso respondeu. Cupom nunca vira preço.
+    // Identidade do produto: usada no dedup, no link curto e na API de preço.
     const chaveAcervo = chaveProduto(urlLimpa) || chaveProduto(meuLink || "");
-    const precoResolvido = resolverPreco({
-      texto: mensagemFinal,
-      daApi: await precoPelaApiDaLoja(loja, chaveAcervo),
-      daPagina: pagina?.preco || null,
-    });
-    /** Nome do produto para o criativo: og:title, senão a 1ª linha da mensagem. */
-    const tituloProduto = pagina?.titulo || primeiraLinha;
-    if (precoResolvido) {
-      console.log(
-        `   💰 Preço do story: ${precoResolvido.atual}` +
-          `${precoResolvido.antigo ? ` (de ${precoResolvido.antigo})` : ""}` +
-          ` · fonte: ${pagina?.preco ? "página" : "texto/API"}`,
-      );
-    }
 
     // Deduplica pela IDENTIDADE DO PRODUTO (MLB/ASIN/shopId.itemId...): o mesmo
     // item pode chegar por links, vitrines e encurtadores diferentes.
@@ -502,6 +486,25 @@ async function processarOferta(
     const primeiraLinha = (
       mensagemFinal.split("\n").find((l) => l.trim()) || ""
     ).trim();
+
+    // Preço e título vêm do PRODUTO, não da manchete da mensagem (FEAT-011).
+    // Fica AQUI (depois de `mensagemFinal`): antes dela o `const` ainda está em
+    // TDZ e o pipeline quebrava com "Cannot access before initialization".
+    // Ordem da fonte: API da loja → página (og:price/og:title) → texto.
+    const precoResolvido = resolverPreco({
+      texto: mensagemFinal,
+      daApi: await precoPelaApiDaLoja(loja, chaveAcervo),
+      daPagina: pagina?.preco || null,
+    });
+    /** Nome do produto para o criativo: og:title, senão a 1ª linha da mensagem. */
+    const tituloProduto = pagina?.titulo || primeiraLinha;
+    if (precoResolvido) {
+      console.log(
+        `   💰 Preço do story: ${precoResolvido.atual}` +
+          `${precoResolvido.antigo ? ` (de ${precoResolvido.antigo})` : ""}` +
+          ` · fonte: ${pagina?.preco ? "página" : "texto/API"}`,
+      );
+    }
     // Registra a oferta para o Instagram (FEAT-009): link curto sempre, mídia
     // composta só com foto real. Falha aqui NUNCA derruba o envio no WhatsApp.
     try {
