@@ -14,7 +14,11 @@
  */
 import config, { inicioDoDiaOperacional } from '../config.js';
 import { carregarAcervo, contarPublicacoesDoDia } from '../midia/acervo.js';
-import { publicarDoAcervo, publicarPostDoAcervo } from '../canais/publicacao.js';
+import {
+  publicarDoAcervo,
+  publicarPostDoAcervo,
+  publicarReelDoAcervo,
+} from '../canais/publicacao.js';
 
 /** Intervalo padrão entre stories (10 min): menos robótico que publicar em lote. */
 export const INTERVALO_PADRAO_SEG = 600;
@@ -60,13 +64,18 @@ async function buscarHttp(url) {
 }
 
 /**
- * Preflight: a Meta precisa BAIXAR a imagem, então a URL tem de responder
- * `200 image/jpeg` de fora. É o que faltou em 27/11 — sem isso a chamada é
- * gasta e volta 9004.
- * @param {{baseUrl?:string, arquivo?:string, buscar?:Function}} [opcoes]
+ * Preflight: a Meta precisa BAIXAR a mídia, então a URL tem de responder
+ * `200` com o tipo certo (JPEG para imagem, MP4 para reels). É o que faltou em
+ * 27/11 — sem isso a chamada é gasta e volta 9004.
+ * @param {{baseUrl?:string, arquivo?:string, esperado?:string, buscar?:Function}} [opcoes]
  * @returns {Promise<{ok:boolean, motivo:string|null, detalhe?:string, bytes?:number, tipo?:string}>}
  */
-export async function preflight({ baseUrl, arquivo, buscar = buscarHttp } = {}) {
+export async function preflight({
+  baseUrl,
+  arquivo,
+  esperado = 'image/jpe?g',
+  buscar = buscarHttp,
+} = {}) {
   if (!baseUrl) return { ok: false, motivo: 'sem-base-url' };
   if (!arquivo) return { ok: false, motivo: 'sem-midia' };
 
@@ -87,16 +96,18 @@ export async function preflight({ baseUrl, arquivo, buscar = buscarHttp } = {}) 
       detalhe: `midia ${midia?.status ?? 'sem resposta'}`,
     };
   }
-  if (!/^image\/jpe?g/i.test(String(midia.tipo || ''))) {
-    // Página de aviso de túnel gratuito cai aqui: HTML onde deveria haver JPEG.
+
+  const tipo = String(midia.tipo || '');
+  if (!new RegExp(`^${esperado}`, 'i').test(tipo)) {
+    // Página de aviso de túnel gratuito cai aqui: HTML onde deveria haver mídia.
     return {
       ok: false,
       motivo: 'midia-inacessivel',
-      detalhe: `tipo ${midia.tipo || 'desconhecido'}`,
+      detalhe: `tipo ${tipo || 'desconhecido'}`,
     };
   }
 
-  return { ok: true, motivo: null, bytes: midia.bytes, tipo: midia.tipo };
+  return { ok: true, motivo: null, bytes: midia.bytes, tipo };
 }
 
 /**
@@ -109,8 +120,10 @@ export function criarPublicadorAutomatico({ cfg = config, avisar = () => {}, dep
   const midiaDir = deps.midiaDir || cfg.publicacao.midiaDir;
   const carregar = deps.carregar || carregarAcervo;
   const confere = deps.preflight || preflight;
+  const contar = deps.contar || contarPublicacoesDoDia;
   const publicar = deps.publicar || publicarDoAcervo;
   const publicarPost = deps.publicarPost || publicarPostDoAcervo;
+  const publicarReel = deps.publicarReel || publicarReelDoAcervo;
   const agora = deps.agora || (() => Date.now());
   const intervaloMs =
     Math.max(
@@ -135,33 +148,53 @@ export function criarPublicadorAutomatico({ cfg = config, avisar = () => {}, dep
     const acervo = carregar(midiaDir);
     const desde = inicioDoDiaOperacional();
     const doDia = {
-      story: contarPublicacoesDoDia(midiaDir, desde, 'story'),
-      post: contarPublicacoesDoDia(midiaDir, desde, 'post'),
+      story: contar(midiaDir, desde, 'story'),
+      post: contar(midiaDir, desde, 'post'),
+      reel: contar(midiaDir, desde, 'reel'),
     };
+    const feedAtivo = Boolean(cfg.publicacao.feedAtivo);
     const pendentes = {
       story: proximoPendente(acervo, 'story'),
-      post: cfg.publicacao.feedAtivo ? proximoPendente(acervo, 'post') : null,
+      post: feedAtivo ? proximoPendente(acervo, 'post') : null,
+      reel: feedAtivo ? proximoPendente(acervo, 'reel') : null,
     };
     avisar(
       `📸 ${PREFIXO} Acervo: story ${doDia.story}/${cfg.publicacao.maxStoriesDia} · ` +
-        `post ${doDia.post}/${cfg.publicacao.maxPostsDia} hoje`,
+        `post ${doDia.post}/${cfg.publicacao.maxPostsDia} · ` +
+        `reel ${doDia.reel}/${cfg.publicacao.maxReelsDia} hoje`,
     );
 
-    // Story tem prioridade (é efêmero, some em 24 h); quando ele está no teto ou
-    // sem pendente, entra o post do feed. Cada formato respeita o SEU teto.
-    const escolhido =
-      pendentes.story && doDia.story < cfg.publicacao.maxStoriesDia
+    const cabeStory =
+      Boolean(pendentes.story) && doDia.story < cfg.publicacao.maxStoriesDia;
+    const cabePost =
+      Boolean(pendentes.post) && doDia.post < cfg.publicacao.maxPostsDia;
+    const cabeReel =
+      Boolean(pendentes.reel) && doDia.reel < cfg.publicacao.maxReelsDia;
+
+    // INTERLEAVE: a cada N stories entra 1 post — feed mais ativo (post é
+    // permanente, story some em 24 h). `STORIES_POR_POST=0` volta à prioridade
+    // absoluta do story.
+    const razao = cfg.publicacao.storiesPorPost || 0;
+    const postDevido =
+      cabePost &&
+      (!cabeStory || (razao > 0 && doDia.story >= (doDia.post + 1) * razao));
+
+    const escolhido = postDevido
+      ? { formato: 'post', alvo: pendentes.post }
+      : cabeStory
         ? { formato: 'story', alvo: pendentes.story }
-        : pendentes.post && doDia.post < cfg.publicacao.maxPostsDia
-          ? { formato: 'post', alvo: pendentes.post }
-          : null;
+        : cabeReel
+          ? { formato: 'reel', alvo: pendentes.reel }
+          : cabePost
+            ? { formato: 'post', alvo: pendentes.post }
+            : null;
 
     if (!escolhido) {
       avisar(`📊 ${PREFIXO} Ciclo: nada a publicar (teto atingido ou fila vazia)`);
       return { motivo: 'vazio' };
     }
     const alvo = escolhido.alvo;
-    const prontos = (pendentes.story ? 1 : 0) + (pendentes.post ? 1 : 0);
+    const prontos = Boolean(pendentes.story) + Boolean(pendentes.post) + Boolean(pendentes.reel);
 
     // CA-2: intervalo entre stories (o limite diário e a quota ficam no
     // `publicarDoAcervo`, que é a fonte única dessas guardas).
@@ -175,6 +208,7 @@ export function criarPublicadorAutomatico({ cfg = config, avisar = () => {}, dep
     const checagem = await confere({
       baseUrl: cfg.publicacao.baseUrl,
       arquivo: alvo.arquivo,
+      esperado: escolhido.formato === 'reel' ? 'video/mp4' : 'image/jpe?g',
     });
     if (!checagem.ok) {
       avisar(
@@ -191,15 +225,19 @@ export function criarPublicadorAutomatico({ cfg = config, avisar = () => {}, dep
     const resultado =
       escolhido.formato === 'post'
         ? await publicarPost({ chavePost: alvo.chave })
-        : await publicar({ chave: alvo.chave });
+        : escolhido.formato === 'reel'
+          ? await publicarReel({ chaveReel: alvo.chave })
+          : await publicar({ chave: alvo.chave });
 
     if (resultado?.mediaId) {
       ultimaPublicacao = agora();
-      const storyHoje = doDia.story + (escolhido.formato === 'story' ? 1 : 0);
-      const postHoje = doDia.post + (escolhido.formato === 'post' ? 1 : 0);
+      const conta = (f) =>
+        doDia[f] + (escolhido.formato === f || (f === 'reel' && escolhido.formato === 'reel') ? 1 : 0);
       avisar(
         `✅ ${PREFIXO} Publicado [${escolhido.formato}] · mediaId ${resultado.mediaId} · ` +
-          `story ${storyHoje}/${cfg.publicacao.maxStoriesDia} · post ${postHoje}/${cfg.publicacao.maxPostsDia}`,
+          `story ${conta('story')}/${cfg.publicacao.maxStoriesDia} · ` +
+          `post ${conta('post')}/${cfg.publicacao.maxPostsDia} · ` +
+          `reel ${conta('reel')}/${cfg.publicacao.maxReelsDia}`,
       );
       return {
         motivo: null,

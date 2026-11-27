@@ -306,6 +306,14 @@ const config = {
      * A quota da Meta (100/24 h) é compartilhada e serve de teto absoluto.
      */
     maxPostsDia: parseInt(process.env.MAX_POSTS_DIA || '6', 10),
+    /**
+     * Quantos stories para cada post no feed (FEAT-013).
+     *
+     * `0` = prioridade absoluta do story (o post só entra quando o story bate o
+     * teto). `2` = a cada 2 stories entra 1 post — feed mais ativo, que é o
+     * pedido da operação: post é permanente, story some em 24 h.
+     */
+    storiesPorPost: Math.max(0, parseInt(process.env.STORIES_POR_POST || '2', 10)),
     /** Resposta automática no Direct (FEAT-005) */
     diretoAtivo: /^(1|true|sim|on)$/i.test(process.env.DIRETO_ATIVO || ''),
     palavraDireto: (process.env.DIRECT_PALAVRA || 'LINK').trim(),

@@ -201,3 +201,59 @@ export async function publicarPostDoAcervo({ chavePost, deps = {} } = {}) {
     return { publicado: false, motivo: 'erro', erro: erro.message };
   }
 }
+
+/**
+ * Publica o REEL de uma chave por formato (`<chave>:reel`).
+ *
+ * Reels é o formato mais caro: a Meta processa o vídeo e só publica depois de
+ * `FINISHED`, por isso a espera é longa (minutos). Teto próprio (`MAX_REELS_DIA`).
+ *
+ * @param {{chaveReel:string, deps?:object}} opcoes
+ */
+export async function publicarReelDoAcervo({ chaveReel, deps = {} } = {}) {
+  const midiaDir = deps.midiaDir || config.publicacao.midiaDir;
+  const acervo = carregarAcervo(midiaDir);
+  const registro = acervo[chaveReel] || null;
+  const baseUrl = deps.baseUrl ?? config.publicacao.baseUrl;
+  const killSwitch = deps.killSwitch ?? config.instagram.publicarStories;
+
+  if (!registro) return { publicado: false, motivo: 'sem-acervo' };
+  if (!killSwitch) return { publicado: false, motivo: 'desligado' };
+  if (!baseUrl) return { publicado: false, motivo: 'sem-base-url' };
+  if (registro.publicadoEm) return { publicado: false, motivo: 'ja-publicado' };
+
+  const desde = deps.desde ?? inicioDoDiaOperacional();
+  const publicadosHoje =
+    deps.publicadosHoje ?? contarPublicacoesDoDia(midiaDir, desde, 'reel');
+  const limite = deps.limiteDia ?? config.publicacao.maxReelsDia;
+  if (Number(limite) > 0 && publicadosHoje >= Number(limite)) {
+    return { publicado: false, motivo: 'limite-reel', publicadosHoje, limite };
+  }
+
+  const legenda =
+    deps.legenda ??
+    legendaDoFeed({
+      titulo: registro.titulo,
+      preco: { atual: Number(registro.preco) },
+      loja: lojaDoLink(registro.link),
+      goDestino: config.publicacao.goDestino,
+      convite: config.whatsapp.meuGrupoLink,
+      incluirConvite: config.whatsapp.feedConviteNaLegenda,
+    });
+
+  const videoUrl = `${baseUrl}/midia/${registro.arquivo}`;
+  const publicar = deps.publicarFeed || publicarFeed;
+
+  try {
+    const mediaId = await publicar(
+      config.instagram,
+      { formato: 'reels', videoUrl, legenda },
+      // Vídeo leva minutos para ficar FINISHED: 40 x 15s = ate 10 min.
+      deps.instagram || { tentativas: 40, esperaMs: 15_000 },
+    );
+    marcarPublicado(midiaDir, chaveReel, { mediaId });
+    return { publicado: true, mediaId, legenda, videoUrl, publicadosHoje, limite };
+  } catch (erro) {
+    return { publicado: false, motivo: 'erro', erro: erro.message };
+  }
+}

@@ -21,6 +21,8 @@ function cfgDeTeste({
   publicarStories = true,
   maxStoriesDia = 12,
   maxPostsDia = 6,
+  maxReelsDia = 1,
+  storiesPorPost = 2,
   intervaloStorySeg = 600,
   feedAtivo = false,
 } = {}) {
@@ -30,6 +32,8 @@ function cfgDeTeste({
       baseUrl: 'https://midia.exemplo',
       maxStoriesDia,
       maxPostsDia,
+      maxReelsDia,
+      storiesPorPost,
       intervaloStorySeg,
       feedAtivo,
     },
@@ -353,4 +357,89 @@ test('CA-1: story pendente tem prioridade sobre o post', async () => {
 
   await p.ciclo();
   assert.equal(formato, 'story');
+});
+
+/* ============ interleave e reels (FEAT-013) ============ */
+
+test('CA-6: interleave — 1 post a cada N stories', async () => {
+  let formato = null;
+  const p = criarPublicadorAutomatico({
+    cfg: cfgDeTeste({ feedAtivo: true, maxPostsDia: 6 }),
+    deps: {
+      carregar: () => ({ ...acervoDois(), ...acervoSóPost() }),
+      preflight: preflightOk,
+      // 4 stories publicados hoje, 0 posts -> já é hora de um post (razao 2)
+      contar: (_dir, _desde, f) => ({ story: 4, post: 0, reel: 0 })[f] || 0,
+      publicar: async () => {
+        formato = 'story';
+        return { mediaId: 's' };
+      },
+      publicarPost: async () => {
+        formato = 'post';
+        return { mediaId: 'p' };
+      },
+    },
+  });
+
+  await p.ciclo();
+  assert.equal(formato, 'post', 'com 4 stories e 0 posts, o post fura a fila');
+});
+
+test('CA-6: interleave desligado (STORIES_POR_POST=0) prioriza o story', async () => {
+  let formato = null;
+  const p = criarPublicadorAutomatico({
+    cfg: cfgDeTeste({ feedAtivo: true, storiesPorPost: 0 }),
+    deps: {
+      carregar: () => ({ ...acervoDois(), ...acervoSóPost() }),
+      preflight: preflightOk,
+      contar: (_dir, _desde, f) => ({ story: 0, post: 0, reel: 0 })[f] || 0,
+      publicar: async () => {
+        formato = 'story';
+        return { mediaId: 's' };
+      },
+      publicarPost: async () => {
+        formato = 'post';
+        return { mediaId: 'p' };
+      },
+    },
+  });
+
+  await p.ciclo();
+  assert.equal(formato, 'story');
+});
+
+test('CA-4: reel pendente é publicado quando story e post não cabem', async () => {
+  let publicouReel = null;
+  const p = criarPublicadorAutomatico({
+    cfg: cfgDeTeste({ feedAtivo: true, maxStoriesDia: 1, maxPostsDia: 1 }),
+    deps: {
+      carregar: () => ({
+        'a:reel': {
+          arquivo: 'v.mp4',
+          formato: 'reel',
+          preco: 50,
+          criado: '2026-11-27T09:00:00Z',
+        },
+        b: { arquivo: 'b.jpg', criado: '2026-11-27T10:00:00Z' },
+      }),
+      preflight: async () => ({
+        ok: true,
+        motivo: null,
+        tipo: 'video/mp4',
+        bytes: 1024,
+      }),
+      // story e post já no teto
+      contar: (_dir, _desde, f) => ({ story: 1, post: 1, reel: 0 })[f] || 0,
+      publicar: async () => ({ mediaId: 's' }),
+      publicarPost: async () => ({ mediaId: 'p' }),
+      publicarReel: async ({ chaveReel }) => {
+        publicouReel = chaveReel;
+        return { mediaId: 'r1' };
+      },
+    },
+  });
+
+  const r = await p.ciclo();
+  assert.equal(publicouReel, 'a:reel');
+  assert.equal(r.formato, 'reel');
 });
