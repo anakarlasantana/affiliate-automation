@@ -57,4 +57,8 @@ Instagram — como post, carrossel ou reels — para alcançar quem não abre os
 - Não gera vídeo a partir de vídeo da loja (a FEAT-006 mediu que nenhuma entrega vídeo utilizável).
 - Não faz anúncios pagos, não edita a bio, não republica oferta já publicada naquele formato.
 - A redação da legenda é a FEAT-014.
+- **Reels: a geração do vídeo fica para depois.** A publicação está pronta e testada
+  (container, `share_to_feed`, espera do `FINISHED`, teto), mas nada gera o MP4 hoje.
+  O formato precisa ser definido antes de ligar — ver `DT-001` em
+  [`docs/debitos-tecnicos.md`](../../docs/debitos-tecnicos.md).
 

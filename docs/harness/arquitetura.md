@@ -96,3 +96,19 @@ Testes cobrem `linkResolver` e `imagem`, que são justamente os módulos com
 parsing frágil. `src/affiliates/*` não tem teste unitário hoje — mudança de
 provider deve ser validada com uma url real e o `npm run doctor`.
 
+
+## Débitos e pendências
+
+O que foi **adiado de propósito** e o que foi **descoberto no uso** e ainda não
+foi resolvido fica em [`docs/debitos-tecnicos.md`](../debitos-tecnicos.md), com
+status, o que já existe, o que falta e qual decisão destrava.
+
+Em aberto hoje:
+
+- **DT-001 · Reels** — publicação pronta (container, `FINISHED`, teto, preflight de
+  `video/mp4`), mas **nada gera o MP4**: `gerarVideo()` é código morto e a foto
+  original não é guardada. Adiado para definir formato/duração/roteiro.
+- **DT-002** — emoji no **story** ainda sai como `▯` (o `semEmoji` só vale no feed).
+- **DT-003** — URL pública efêmera (túnel ngrok): quando muda, a mídia e a bio caem.
+- **DT-004** — `app.js` sem teste de integração (o bug de TDZ passou por 181 testes).
+- **DT-005** — 22 stories em quarentena sem foto original (decisão: apagar ou manter).

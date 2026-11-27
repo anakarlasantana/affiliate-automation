@@ -49,6 +49,7 @@ Não há lint nem build: o projeto é Node >=18, ESM puro, roda direto de `src/`
 | receitas: nova loja, depurar link, deploy | `docs/harness/receitas.md` |
 | peculiaridades de link por loja | `docs/links-afiliados-por-loja.md` |
 | requisitos e critérios de aceite | `spec/<ID>-<slug>/requisito.md` (gate: `ai spec review` / `ai spec approve`) |
+| **o que foi adiado de propósito e por quê** | `docs/debitos-tecnicos.md` |
 | variáveis de ambiente | `.env.example` + `src/config.js` |
 | operação (systemd, Docker, QR, doctor) | `README.md` |
 
