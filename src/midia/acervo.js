@@ -89,18 +89,26 @@ export function marcarPublicado(midiaDir, chave, { mediaId = null, quando } = {}
 
 /**
  * Quantas chaves do acervo foram publicadas desde `desde`.
+ *
+ * `formato` separa story de post: sem isso um post consumiria a vaga de um story
+ * (era o que acontecia antes da FEAT-013) e nenhum dos dois tetos valeria.
+ *
  * `desde` aceita ISO ou o formato do SQLite ('YYYY-MM-DD HH:MM:SS', em UTC).
  */
-export function contarPublicacoesDoDia(midiaDir, desde) {
+export function contarPublicacoesDoDia(midiaDir, desde, formato = null) {
   let base = Number(desde);
   if (!Number.isFinite(base)) {
     base = Date.parse(`${String(desde || '').replace(' ', 'T')}Z`);
   }
   if (!Number.isFinite(base)) return 0;
 
-  return Object.values(carregarAcervo(midiaDir)).filter((registro) => {
+  return Object.entries(carregarAcervo(midiaDir)).filter(([chave, registro]) => {
     const t = Date.parse(registro.publicadoEm || '');
-    return Number.isFinite(t) && t >= base;
+    if (!Number.isFinite(t) || t < base) return false;
+    if (!formato) return true;
+    const doRegistro =
+      registro.formato || (String(chave).includes(':') ? 'post' : 'story');
+    return doRegistro === formato;
   }).length;
 }
 

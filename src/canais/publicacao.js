@@ -9,7 +9,8 @@
 import config, { inicioDoDiaOperacional } from '../config.js';
 import { carregarAcervo, contarPublicacoesDoDia, marcarPublicado } from '../midia/acervo.js';
 import { precoCurto } from '../midia/compor.js';
-import { quota } from './instagram.js';
+import { publicarFeed, quota } from './instagram.js';
+import { legendaDoFeed, lojaDoLink } from '../midia/legenda.js';
 import { InstagramStory } from './index.js';
 
 export const MOTIVOS_PUBLICACAO = {
@@ -140,4 +141,63 @@ export async function publicarDoAcervo({ chave, preco, deps = {} } = {}) {
   }
 
   return { ...resultado, imagemUrl, legenda, quota: quotaAtual };
+}
+
+/**
+ * Publica o POST do feed de uma chave POR FORMATO (`<chave>:post`).
+ *
+ * Espelha o `publicarDoAcervo`, com três diferenças que importam:
+ *  - teto PRÓPRIO (`MAX_POSTS_DIA`) e contagem por formato — post não rouba vaga
+ *    de story;
+ *  - legenda longa do feed (FEAT-014) em vez do texto curto de story;
+ *  - container `IMAGE` via `publicarFeed`.
+ *
+ * @param {{chavePost:string, deps?:object}} opcoes
+ * @returns {Promise<{publicado:boolean, mediaId?:string, motivo?:string, erro?:string}>}
+ */
+export async function publicarPostDoAcervo({ chavePost, deps = {} } = {}) {
+  const midiaDir = deps.midiaDir || config.publicacao.midiaDir;
+  const acervo = carregarAcervo(midiaDir);
+  const registro = acervo[chavePost] || null;
+  const baseUrl = deps.baseUrl ?? config.publicacao.baseUrl;
+  const killSwitch = deps.killSwitch ?? config.instagram.publicarStories;
+
+  if (!registro) return { publicado: false, motivo: 'sem-acervo' };
+  if (!killSwitch) return { publicado: false, motivo: 'desligado' };
+  if (!baseUrl) return { publicado: false, motivo: 'sem-base-url' };
+  if (registro.publicadoEm) return { publicado: false, motivo: 'ja-publicado' };
+
+  const desde = deps.desde ?? inicioDoDiaOperacional();
+  const publicadosHoje =
+    deps.publicadosHoje ?? contarPublicacoesDoDia(midiaDir, desde, 'post');
+  const limite = deps.limiteDia ?? config.publicacao.maxPostsDia;
+  if (Number(limite) > 0 && publicadosHoje >= Number(limite)) {
+    return { publicado: false, motivo: 'limite-post', publicadosHoje, limite };
+  }
+
+  const legenda =
+    deps.legenda ??
+    legendaDoFeed({
+      titulo: registro.titulo,
+      preco: { atual: Number(registro.preco) },
+      loja: lojaDoLink(registro.link),
+      goDestino: config.publicacao.goDestino,
+      convite: config.whatsapp.meuGrupoLink,
+      incluirConvite: config.whatsapp.feedConviteNaLegenda,
+    });
+
+  const imagemUrl = `${baseUrl}/midia/${registro.arquivo}`;
+  const publicar = deps.publicarFeed || publicarFeed;
+
+  try {
+    const mediaId = await publicar(
+      config.instagram,
+      { formato: 'post', imagens: [imagemUrl], legenda },
+      deps.instagram || { tentativas: 10, esperaMs: 6_000 },
+    );
+    marcarPublicado(midiaDir, chavePost, { mediaId });
+    return { publicado: true, mediaId, legenda, imagemUrl, publicadosHoje, limite };
+  } catch (erro) {
+    return { publicado: false, motivo: 'erro', erro: erro.message };
+  }
 }

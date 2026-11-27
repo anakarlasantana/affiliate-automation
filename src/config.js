@@ -298,6 +298,14 @@ const config = {
      */
     feedAtivo: /^(1|true|sim|on)$/i.test(process.env.FEED_ATIVO ?? '1'),
     maxReelsDia: parseInt(process.env.MAX_REELS_DIA || '1', 10),
+    /**
+     * Teto de POSTS no feed por dia (FEAT-013).
+     *
+     * Separado do de stories de propósito: story dura 24 h, post fica na grade
+     * para sempre. 12/dia viraria 84 posts por semana na parede do perfil.
+     * A quota da Meta (100/24 h) é compartilhada e serve de teto absoluto.
+     */
+    maxPostsDia: parseInt(process.env.MAX_POSTS_DIA || '6', 10),
     /** Resposta automática no Direct (FEAT-005) */
     diretoAtivo: /^(1|true|sim|on)$/i.test(process.env.DIRETO_ATIVO || ''),
     palavraDireto: (process.env.DIRECT_PALAVRA || 'LINK').trim(),

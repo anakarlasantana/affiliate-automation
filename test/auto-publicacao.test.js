@@ -20,14 +20,18 @@ const DIR = '/tmp/acervo-que-nao-existe-feat012';
 function cfgDeTeste({
   publicarStories = true,
   maxStoriesDia = 12,
+  maxPostsDia = 6,
   intervaloStorySeg = 600,
+  feedAtivo = false,
 } = {}) {
   return {
     publicacao: {
       midiaDir: DIR,
       baseUrl: 'https://midia.exemplo',
       maxStoriesDia,
+      maxPostsDia,
       intervaloStorySeg,
+      feedAtivo,
     },
     instagram: { publicarStories },
   };
@@ -267,4 +271,86 @@ test('CA-7: o ciclo de story ignora entradas de outro formato', () => {
 
   assert.equal(proximoPendente(acervo).chave, 'b', 'post não fura a fila do story');
   assert.equal(proximoPendente(acervo, 'post').chave, 'a:post');
+});
+
+/* ============ FEAT-013: o post sai sozinho, com teto próprio ============ */
+
+const acervoSóPost = () => ({
+  'meli-MLB1:post': {
+    arquivo: 'p.jpg',
+    formato: 'post',
+    preco: 99,
+    criado: '2026-11-27T10:00:00Z',
+  },
+});
+
+test('CA-6: com feed ativo, o ciclo publica o post quando não há story', async () => {
+  const avisos = [];
+  let publicouPost = null;
+
+  const p = criarPublicadorAutomatico({
+    cfg: cfgDeTeste({ feedAtivo: true }),
+    avisar: (m) => avisos.push(m),
+    deps: {
+      carregar: acervoSóPost,
+      preflight: preflightOk,
+      publicar: async () => {
+        throw new Error('não deveria publicar story');
+      },
+      publicarPost: async ({ chavePost }) => {
+        publicouPost = chavePost;
+        return { publicado: true, mediaId: 'media-post' };
+      },
+    },
+  });
+
+  const r = await p.ciclo();
+
+  assert.equal(publicouPost, 'meli-MLB1:post');
+  assert.equal(r.formato, 'post');
+  assert.equal(r.mediaId, 'media-post');
+  assert.ok(avisos.some((m) => m.includes('[post]')), 'log precisa dizer o formato');
+});
+
+test('CA-6: post no teto do dia não é publicado', async () => {
+  let chamou = false;
+  const p = criarPublicadorAutomatico({
+    cfg: cfgDeTeste({ feedAtivo: true, maxPostsDia: 0 }),
+    deps: {
+      carregar: acervoSóPost,
+      preflight: preflightOk,
+      publicar: async () => ({ mediaId: '1' }),
+      publicarPost: async () => {
+        chamou = true;
+        return { mediaId: '2' };
+      },
+    },
+  });
+
+  const r = await p.ciclo();
+
+  assert.equal(r.motivo, 'vazio');
+  assert.equal(chamou, false, 'MAX_POSTS_DIA=0 bloqueia o post');
+});
+
+test('CA-1: story pendente tem prioridade sobre o post', async () => {
+  let formato = null;
+  const p = criarPublicadorAutomatico({
+    cfg: cfgDeTeste({ feedAtivo: true }),
+    deps: {
+      carregar: () => ({ ...acervoDois(), ...acervoSóPost() }),
+      preflight: preflightOk,
+      publicar: async () => {
+        formato = 'story';
+        return { mediaId: 's1' };
+      },
+      publicarPost: async () => {
+        formato = 'post';
+        return { mediaId: 'p1' };
+      },
+    },
+  });
+
+  await p.ciclo();
+  assert.equal(formato, 'story');
 });

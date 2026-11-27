@@ -14,7 +14,7 @@
  */
 import config, { inicioDoDiaOperacional } from '../config.js';
 import { carregarAcervo, contarPublicacoesDoDia } from '../midia/acervo.js';
-import { publicarDoAcervo } from '../canais/publicacao.js';
+import { publicarDoAcervo, publicarPostDoAcervo } from '../canais/publicacao.js';
 
 /** Intervalo padrão entre stories (10 min): menos robótico que publicar em lote. */
 export const INTERVALO_PADRAO_SEG = 600;
@@ -110,6 +110,7 @@ export function criarPublicadorAutomatico({ cfg = config, avisar = () => {}, dep
   const carregar = deps.carregar || carregarAcervo;
   const confere = deps.preflight || preflight;
   const publicar = deps.publicar || publicarDoAcervo;
+  const publicarPost = deps.publicarPost || publicarPostDoAcervo;
   const agora = deps.agora || (() => Date.now());
   const intervaloMs =
     Math.max(
@@ -132,15 +133,35 @@ export function criarPublicadorAutomatico({ cfg = config, avisar = () => {}, dep
     }
 
     const acervo = carregar(midiaDir);
-    const prontos = Object.values(acervo).filter((r) => r && !r.publicadoEm).length;
-    const publicadosHoje = contarPublicacoesDoDia(midiaDir, inicioDoDiaOperacional());
-    avisar(`📸 ${PREFIXO} Acervo: ${prontos} prontos · ${publicadosHoje} publicados hoje`);
+    const desde = inicioDoDiaOperacional();
+    const doDia = {
+      story: contarPublicacoesDoDia(midiaDir, desde, 'story'),
+      post: contarPublicacoesDoDia(midiaDir, desde, 'post'),
+    };
+    const pendentes = {
+      story: proximoPendente(acervo, 'story'),
+      post: cfg.publicacao.feedAtivo ? proximoPendente(acervo, 'post') : null,
+    };
+    avisar(
+      `📸 ${PREFIXO} Acervo: story ${doDia.story}/${cfg.publicacao.maxStoriesDia} · ` +
+        `post ${doDia.post}/${cfg.publicacao.maxPostsDia} hoje`,
+    );
 
-    const alvo = proximoPendente(acervo);
-    if (!alvo) {
-      avisar(`📊 ${PREFIXO} Ciclo: nada pendente`);
+    // Story tem prioridade (é efêmero, some em 24 h); quando ele está no teto ou
+    // sem pendente, entra o post do feed. Cada formato respeita o SEU teto.
+    const escolhido =
+      pendentes.story && doDia.story < cfg.publicacao.maxStoriesDia
+        ? { formato: 'story', alvo: pendentes.story }
+        : pendentes.post && doDia.post < cfg.publicacao.maxPostsDia
+          ? { formato: 'post', alvo: pendentes.post }
+          : null;
+
+    if (!escolhido) {
+      avisar(`📊 ${PREFIXO} Ciclo: nada a publicar (teto atingido ou fila vazia)`);
       return { motivo: 'vazio' };
     }
+    const alvo = escolhido.alvo;
+    const prontos = (pendentes.story ? 1 : 0) + (pendentes.post ? 1 : 0);
 
     // CA-2: intervalo entre stories (o limite diário e a quota ficam no
     // `publicarDoAcervo`, que é a fonte única dessas guardas).
@@ -165,16 +186,27 @@ export function criarPublicadorAutomatico({ cfg = config, avisar = () => {}, dep
     avisar(`🔎 ${PREFIXO} Preflight ok · health 200 · mídia 200 ${checagem.tipo} ${kb}KB`);
 
     const preco = Number.isFinite(alvo.preco) ? ` · R$ ${alvo.preco}` : '';
-    avisar(`🆔 ${PREFIXO} Publicando ${alvo.chave}${preco}`);
+    avisar(`🆔 ${PREFIXO} Publicando [${escolhido.formato}] ${alvo.chave}${preco}`);
 
-    const resultado = await publicar({ chave: alvo.chave });
+    const resultado =
+      escolhido.formato === 'post'
+        ? await publicarPost({ chavePost: alvo.chave })
+        : await publicar({ chave: alvo.chave });
 
     if (resultado?.mediaId) {
       ultimaPublicacao = agora();
+      const storyHoje = doDia.story + (escolhido.formato === 'story' ? 1 : 0);
+      const postHoje = doDia.post + (escolhido.formato === 'post' ? 1 : 0);
       avisar(
-        `✅ ${PREFIXO} Publicado · mediaId ${resultado.mediaId} · hoje ${publicadosHoje + 1}/${cfg.publicacao.maxStoriesDia}`,
+        `✅ ${PREFIXO} Publicado [${escolhido.formato}] · mediaId ${resultado.mediaId} · ` +
+          `story ${storyHoje}/${cfg.publicacao.maxStoriesDia} · post ${postHoje}/${cfg.publicacao.maxPostsDia}`,
       );
-      return { motivo: null, publicado: alvo.chave, mediaId: resultado.mediaId };
+      return {
+        motivo: null,
+        formato: escolhido.formato,
+        publicado: alvo.chave,
+        mediaId: resultado.mediaId,
+      };
     }
 
     const motivo = resultado?.motivo || 'desconhecido';
