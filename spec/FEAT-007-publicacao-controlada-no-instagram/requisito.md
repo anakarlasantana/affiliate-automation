@@ -4,7 +4,14 @@ titulo: Publicação controlada no Instagram
 persona: operadora
 prioridade: ALTA
 origem: "lacunas encontradas ao subir o servidor local: mídia sem índice, quota nunca consultada"
-estado: em-revisao
+estado: aprovado
+aprovado_por: Ana Karla Santana
+aprovado_conta: t-ana.santana@cni.com.br
+aprovado_em: 2026-11-26T15:03:25.614Z
+aprovado_sha: 0056202d412f867fcd898c21ec1565de995226c017ef1740d304c58b0009f5c2
+avisos_aceitos: ""
+aprovado_terminal: "true"
+aprovado_origem: git-config
 ---
 
 ## História
@@ -50,3 +57,7 @@ WhatsApp e sem publicar por acidente.
 - Deploy (systemd do servidor + HTTPS): é operação, vive no README — não é comportamento testável.
 - Galeria do Mercado Livre (OAuth) para carrossel: segue como pré-requisito da FEAT-006.
 - Publicar no Direct: é a FEAT-005; aqui só o story.
+
+## Histórico
+
+- 2026-11-26T15:03:25.614Z — aprovado por Ana Karla Santana <t-ana.santana@cni.com.br> (Notebook, origem git-config); sha 0056202d412f
