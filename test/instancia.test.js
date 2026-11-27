@@ -212,3 +212,18 @@ test('CA-4: ps indisponível não derruba o boot', () => {
   assert.deepEqual(processosDoApp({ executar: falha }), []);
 });
 
+test('CA-1: shell/grep que apenas CITAM o caminho não são instância', () => {
+  // Regressão do bug real: com `linha.includes('src/app.js')` o app barrava a si
+  // mesmo quando o comando do shell (grep, pgrep, editor) citava o arquivo.
+  const saida = [
+    '  444 /bin/bash -c pgrep -af "node src/app.js"',
+    '  555 grep -rn src/app.js src/',
+    '  666 node --test test/instancia.test.js',
+    '  777 vim src/app.js',
+    '  888 node src/app.js',
+    '',
+  ].join('\n');
+
+  assert.deepEqual(processosDoApp({ executar: () => saida }), [888]);
+});
+

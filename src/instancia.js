@@ -74,8 +74,16 @@ function executarPs() {
   });
 }
 
+/** Argumento que é o app de verdade (`src/app.js`), não um texto que o cita. */
+const ARGUMENTO_APP = /(^|\/)src\/app\.js$/;
+
 /**
  * PIDs de outros processos do app (`src/app.js`), sem o próprio.
+ *
+ * ARMADILHA (bug encontrado em produção local): procurar a string `src/app.js`
+ * na linha inteira do `ps` casa com `grep`, `pgrep` e com qualquer shell cujo
+ * comando CITE o caminho — o app barrava a si mesmo. Só conta quando o
+ * executável é `node`/`nodejs` e `src/app.js` é um argumento dele.
  *
  * Não filtra por `--diag-midia`: o perfil do Chrome é exclusivo em QUALQUER
  * modo, então um diagnóstico aberto também impede o pipeline de subir.
@@ -86,9 +94,23 @@ export function processosDoApp({ executar = executarPs } = {}) {
   try {
     return String(executar())
       .split('\n')
-      .filter((linha) => linha.includes('src/app.js'))
-      .map((linha) => Number.parseInt(linha.trim().split(/\s+/)[0], 10))
-      .filter((pid) => Number.isInteger(pid) && pid > 0 && pid !== process.pid);
+      .map((linha) => linha.trim())
+      .filter(Boolean)
+      .map((linha) => {
+        const [pidTexto, ...args] = linha.split(/\s+/);
+        return { pid: Number.parseInt(pidTexto, 10), args };
+      })
+      .filter(
+        ({ pid }) => Number.isInteger(pid) && pid > 0 && pid !== process.pid,
+      )
+      .filter(({ args }) => {
+        const executavel = path.basename(args[0] || '');
+        if (executavel !== 'node' && executavel !== 'nodejs') return false;
+        // `node --test` roda a suíte, não abre navegador nem toca no perfil.
+        if (args.includes('--test')) return false;
+        return args.slice(1).some((arg) => ARGUMENTO_APP.test(arg));
+      })
+      .map(({ pid }) => pid);
   } catch {
     return [];
   }

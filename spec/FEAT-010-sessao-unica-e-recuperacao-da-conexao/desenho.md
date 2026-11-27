@@ -39,6 +39,9 @@ handlers SIGINT/SIGTERM/uncaughtException
 - **Default de 300s (era 60s):** sem TTY ninguém escaneia na hora; o QR é lido de `tokens/qr-ascii.txt`.
 - **`process.exit(1)` no `browserClose`:** sob systemd, seguir sem navegador deixa o serviço `active` e
   o `Restart=` nunca acontece — foi o que aconteceu em 27/11 (pid vivo, sem Chrome).
+- **Só `node … src/app.js` conta como instância:** procurar a string `src/app.js` na linha inteira do
+  `ps` casava com `grep`, `pgrep` e com qualquer shell que apenas CITA o caminho — no primeiro teste
+  real o app barrou a si mesmo. Por isso o filtro exige executável `node`/`nodejs` (e ignora `--test`).
 
 ## Riscos
 
