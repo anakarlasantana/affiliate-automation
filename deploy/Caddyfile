@@ -1,0 +1,38 @@
+# Caddyfile — HTTPS público para a mídia do Instagram (FEAT-015)
+#
+# POR QUÊ existe: a Meta só baixa imagem/vídeo por HTTPS. Antes disso o projeto
+# só fazia saída (WhatsApp) e um túnel efêmero servia de ponte — que mudava de URL
+# e derrubava a publicação (erro 9004) e a bio. Aqui o próprio servidor expõe.
+#
+# Uso no servidor:
+#   sudo cp deploy/Caddyfile /etc/caddy/Caddyfile
+#   sudo sed -i "s/SEU_HOST_AQUI/147-15-55-124.sslip.io/" /etc/caddy/Caddyfile
+#   sudo systemctl reload caddy
+#
+# O app escuta em 127.0.0.1:3000 (fechado para o mundo); só 80/443 são públicos.
+
+SEU_HOST_AQUI {
+	encode zstd gzip
+
+	# Todo o resto do site é o servidor do app: /go/<chave>, /midia/<arquivo>,
+	# /health e /webhooks/instagram. O que não existe já responde 404 lá.
+	reverse_proxy 127.0.0.1:3000 {
+		header_up X-Forwarded-For {remote_host}
+	}
+
+	# Log separado facilita ver o que a Meta pediu (e o que falhou).
+	log {
+		output file /var/log/caddy/affiliate-automation.log {
+			roll_size 10MiB
+			roll_keep 3
+		}
+		format console
+	}
+
+	header {
+		# A mídia é imutável (nome = hash do conteúdo).
+		@midia path /midia/*
+		header @midia Cache-Control "public, max-age=31536000, immutable"
+		-Server
+	}
+}

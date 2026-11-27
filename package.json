@@ -15,6 +15,7 @@
     "ensaiar": "node scripts/ensaiar-story.mjs",
     "publicar": "node scripts/publicar-story.mjs",
     "publicar:feed": "node scripts/publicar-feed.mjs",
+    "deploy:vps": "node scripts/deploy-vps.mjs",
     "recompor": "node scripts/recompor-acervo.mjs",
     "status": "node src/status.js",
     "doctor": "node src/app.js --doctor",
