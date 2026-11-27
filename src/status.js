@@ -4,9 +4,43 @@
  */
 import fs from 'node:fs';
 import path from 'node:path';
-import { DATA_DIR } from './config.js';
+import config, { DATA_DIR, inicioDoDiaOperacional } from './config.js';
 import { resumoLojas } from './affiliates/index.js';
 import { contarEnviosHoje, contarOrigemDasFotos } from './database.js';
+import { carregarAcervo } from './midia/acervo.js';
+import { quota as quotaInstagram } from './canais/instagram.js';
+import { secaoInstagram } from './status-ig.js';
+
+/** Lê o último bloqueio persistido pelo ciclo automático (se houver). */
+function lerBloqueioIg() {
+  try {
+    return JSON.parse(
+      fs.readFileSync(
+        path.join(config.publicacao.midiaDir, 'ig-bloqueio.json'),
+        'utf8',
+      ),
+    );
+  } catch {
+    return null;
+  }
+}
+
+/** Monta as linhas do Instagram com os dados reais (quota é read-only). */
+async function linhasDoInstagram() {
+  let quotaAtual = null;
+  try {
+    quotaAtual = await quotaInstagram(config.instagram);
+  } catch {
+    quotaAtual = null;
+  }
+  return secaoInstagram({
+    acervo: carregarAcervo(config.publicacao.midiaDir),
+    quota: quotaAtual,
+    limiteDia: config.publicacao.maxStoriesDia,
+    bloqueio: lerBloqueioIg(),
+    desde: inicioDoDiaOperacional(),
+  });
+}
 
 /** Caminho absoluto (config): funciona mesmo rodando de outro diretorio. */
 const caminho = path.join(DATA_DIR, 'fila-status.json');
@@ -26,6 +60,7 @@ function mostrarLojasSemCredencial() {
 
 if (!fs.existsSync(caminho)) {
   console.log('Sem dados de status ainda (o app precisa rodar ao menos uma vez).');
+  console.log((await linhasDoInstagram()).join('\n'));
   mostrarLojasSemCredencial();
   process.exit(0);
 }
@@ -66,5 +101,6 @@ if (origens.length) {
   );
 }
 
+console.log((await linhasDoInstagram()).join('\n'));
 mostrarLojasSemCredencial();
 console.log('');

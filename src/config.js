@@ -277,6 +277,11 @@ const config = {
     /** Onde as mídias compostas são servidas */
     midiaDir: process.env.MIDIA_DIR || path.join(DATA_DIR, 'midia'),
     maxStoriesDia: parseInt(process.env.MAX_STORIES_DIA || '5', 10),
+    /** Segundos entre duas publicações automáticas (FEAT-012). */
+    intervaloStorySeg: Math.max(
+      120,
+      parseInt(process.env.INTERVALO_STORY_SEG || '600', 10),
+    ),
     maxReelsDia: parseInt(process.env.MAX_REELS_DIA || '1', 10),
     /** Resposta automática no Direct (FEAT-005) */
     diretoAtivo: /^(1|true|sim|on)$/i.test(process.env.DIRETO_ATIVO || ''),
