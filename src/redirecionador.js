@@ -21,9 +21,20 @@ export function chaveDoCaminho(caminho) {
  */
 export function montarDestino(chave, destinos) {
   if (!chave || !destinos) return null;
-  const destino = destinos[chave];
-  if (typeof destino !== 'string' || !/^https:\/\//i.test(destino)) return null;
-  return destino;
+
+  // O acervo guarda uma chave POR FORMATO (`meli-MLB1`, `meli-MLB1:post`), mas o
+  // mapa de destinos é por PRODUTO. Sem esse fallback o `/go` apontava para a
+  // chave do post e respondia 404 (regressão pega ao publicar o 1º post).
+  const candidatas = [chave];
+  if (String(chave).includes(':')) candidatas.push(String(chave).split(':')[0]);
+
+  for (const tentativa of candidatas) {
+    const destino = destinos[tentativa];
+    if (typeof destino === 'string' && /^https:\/\//i.test(destino)) {
+      return destino;
+    }
+  }
+  return null;
 }
 
 /** Incrementa o clique da chave sem mutar o objeto recebido. */

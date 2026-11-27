@@ -14,6 +14,7 @@
     "verify:api": "npm run verify:links && npm run verify:ig",
     "ensaiar": "node scripts/ensaiar-story.mjs",
     "publicar": "node scripts/publicar-story.mjs",
+    "publicar:feed": "node scripts/publicar-feed.mjs",
     "recompor": "node scripts/recompor-acervo.mjs",
     "status": "node src/status.js",
     "doctor": "node src/app.js --doctor",

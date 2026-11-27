@@ -56,12 +56,36 @@ export function limparTextoDoGrupo(texto) {
     .trim();
 }
 
+/** Nome canônico da loja a partir do link (é a chave das hashtags e do rótulo). */
+const LOJA_POR_DOMINIO = [
+  [/mercadolivre|mercadolibre|meli\.la/i, 'MercadoLivre'],
+  [/shopee/i, 'Shopee'],
+  [/magazineluiza|magalu/i, 'Magalu'],
+];
+
+/**
+ * Descobre a loja pelo link de afiliado.
+ * @param {string} link
+ * @returns {string} nome canônico ou ''
+ */
+export function lojaDoLink(link) {
+  const alvo = String(link || '');
+  for (const [padrao, nome] of LOJA_POR_DOMINIO) {
+    if (padrao.test(alvo)) return nome;
+  }
+  return '';
+}
+
 /**
  * Primeira linha: produto + preço + gancho, em até 125 caracteres (CA-3).
+ *
+ * Os asteriscos de negrito do WhatsApp são removidos: no feed eles aparecem
+ * literais (`*MENOR PREÇO*`) em vez de virar negrito.
  * @param {{titulo?:string, preco?:{atual:number}|null}} [dados]
  */
 export function gancho({ titulo, preco } = {}) {
   const nome = String(titulo || 'Oferta')
+    .replace(/\*/g, '')
     .replace(/\s+/g, ' ')
     .trim();
   const valor = Number.isFinite(preco?.atual) ? ` por ${moeda(preco.atual)}` : '';

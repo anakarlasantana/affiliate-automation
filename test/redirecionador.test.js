@@ -90,3 +90,12 @@ test('mapa de destinos persiste em disco e só aceita https', () => {
     fs.rmSync(pasta, { recursive: true, force: true });
   }
 });
+
+test('FEAT-013 CA-10: chave por formato (:post) cai na chave do produto', () => {
+  const destinos = { 'meli-MLB1': 'https://produto.mercadolivre.com.br/MLB-1-_JM' };
+  assert.equal(
+    montarDestino('meli-MLB1:post', destinos),
+    'https://produto.mercadolivre.com.br/MLB-1-_JM',
+  );
+  assert.equal(montarDestino('meli-MLB9:post', destinos), null);
+});

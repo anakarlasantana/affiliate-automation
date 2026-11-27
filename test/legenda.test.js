@@ -15,6 +15,7 @@ import {
   gancho,
   legendaDoFeed,
   limparUrlDeConvite,
+  lojaDoLink,
   linhaDoPreco,
   montarHashtags,
   truncarPorLinha,
@@ -201,4 +202,19 @@ test('CA-5: limparUrlDeConvite encurta e recusa lixo', () => {
   );
   assert.equal(limparUrlDeConvite(''), '');
   assert.equal(limparUrlDeConvite('nao-e-url'), '');
+});
+
+test('CA-1/CA-4: asteriscos do WhatsApp saem e a loja sai do link', () => {
+  const l = legendaDoFeed({
+    titulo: '*MENOR PREÇO JÁ POSTADO*',
+    preco: { atual: 68 },
+    loja: lojaDoLink('https://produto.mercadolivre.com.br/MLB-1-_JM'),
+  });
+  assert.doesNotMatch(l, /\*/);
+  assert.match(l, /🏬 MercadoLivre/);
+  assert.match(l, /#mercadolivre/, 'a hashtag da loja precisa entrar');
+
+  assert.equal(lojaDoLink('https://s.shopee.com.br/abc'), 'Shopee');
+  assert.equal(lojaDoLink('https://www.magazineluiza.com.br/x'), 'Magalu');
+  assert.equal(lojaDoLink('https://kabum.com.br/x'), '');
 });
