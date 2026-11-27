@@ -19,7 +19,7 @@ const GRUPO = 'https://chat.whatsapp.com/convite';
 
 function configDeTeste(midiaDir) {
   return {
-    publicacao: { goDestino: 'grupo', midiaDir, palavraDireto: 'LINK' },
+    publicacao: { goDestino: 'grupo', midiaDir, palavraDireto: 'LINK', diretoAtivo: true },
     whatsapp: { meuGrupoLink: GRUPO },
     instagram: {
       appSecret: SEGREDO,
@@ -53,14 +53,17 @@ function pedir(porta, { method = 'GET', caminho = '/', corpo = '', headers = {} 
   });
 }
 
-async function comServidor(executar) {
+async function comServidor(executar, opcoes = {}) {
   const midiaDir = fs.mkdtempSync(path.join(os.tmpdir(), 'midia-teste-'));
   const enviados = [];
   const respondidos = {};
   const cliques = {};
+  const cfg = configDeTeste(midiaDir);
+
+  if (opcoes.diretoAtivo !== undefined) cfg.publicacao.diretoAtivo = opcoes.diretoAtivo;
 
   const servidor = criarServidor({
-    config: configDeTeste(midiaDir),
+    config: cfg,
     destinos: { MLB4161352905: DESTINO },
     cliques,
     respondidos,
@@ -232,6 +235,25 @@ test('webhook assinado responde 200 e envia uma DM; reenvio não duplica (CA-3)'
     await new Promise((resolver) => setTimeout(resolver, 40));
     assert.equal(enviados.length, 1, 'idempotente por mid');
   });
+});
+
+test('DIRETO_ATIVO desligado não responde, mesmo com assinatura válida (CA-3)', async () => {
+  await comServidor(
+    async ({ porta, enviados }) => {
+      const corpo = payloadLINK('mid-desligado');
+      const r = await pedir(porta, {
+        method: 'POST',
+        caminho: '/webhooks/instagram',
+        corpo,
+        headers: { 'x-hub-signature-256': assinar(corpo), 'content-type': 'application/json' },
+      });
+
+      assert.equal(r.status, 200, 'responde 200 para a Meta não reenviar em loop');
+      await new Promise((resolver) => setTimeout(resolver, 40));
+      assert.equal(enviados.length, 0, 'nenhuma DM com a flag desligada');
+    },
+    { diretoAtivo: false },
+  );
 });
 
 test('linkCurto e nomeSeguro protegem o básico', () => {

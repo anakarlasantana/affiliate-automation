@@ -114,6 +114,10 @@ export function criarServidor({
    * Devolve o registro de respondidos (sem mutar o recebido).
    */
   function processarDirect(payload, respondidosAtuais) {
+    // Flag manda mais que assinatura: com o Direct desligado, nada é enviado
+    // (mas a rota continua respondendo 200 para a Meta não reenviar em loop).
+    if (!publicacao.diretoAtivo) return respondidosAtuais;
+
     const evento = lerEvento(payload);
     if (!evento) return respondidosAtuais;
 

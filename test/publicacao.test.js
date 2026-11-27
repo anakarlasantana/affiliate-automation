@@ -17,7 +17,7 @@ import {
   legendaDoStory,
   publicarDoAcervo,
 } from '../src/canais/publicacao.js';
-import { buscarNoAcervo, registrarNoAcervo } from '../src/midia/acervo.js';
+import { buscarNoAcervo, contarPublicacoesDoDia, marcarPublicado, registrarNoAcervo } from '../src/midia/acervo.js';
 
 const REGISTRO = {
   arquivo: 'abc123.jpg',
@@ -235,4 +235,75 @@ test('legenda do story combina título, preço e CTA', () => {
   assert.match(legendaDoStory({ preco: 89.9 }), /R\$ 89,90/);
   assert.match(legendaDoStory({}), /Oferta/, 'sem título, ainda tem cabeça');
 });
+
+/* ---------------- CA-4, CA-5 e CA-6: dedup, limite e marcação ---------------- */
+
+const DEPS_OK = (midiaDir, extra = {}) => ({
+  midiaDir,
+  killSwitch: true,
+  credencialOk: true,
+  baseUrl: 'https://go.exemplo.com',
+  quota: async () => ({ usada: 0, total: 50 }),
+  ...extra,
+});
+
+test('chave já publicada é recusada com ja-publicado (CA-4)', async () => {
+  await comAcervo(async (midiaDir) => {
+    registrarNoAcervo(midiaDir, 'k', REGISTRO);
+    marcarPublicado(midiaDir, 'k', { mediaId: 'media-antiga' });
+
+    const r = await publicarDoAcervo({ chave: 'k', deps: DEPS_OK(midiaDir) });
+
+    assert.equal(r.pronto, false);
+    assert.equal(r.motivo, MOTIVOS_PUBLICACAO.JA_PUBLICADO);
+  });
+});
+
+test('limite diário do acervo recusa novas publicações (CA-5)', async () => {
+  await comAcervo(async (midiaDir) => {
+    registrarNoAcervo(midiaDir, 'k', REGISTRO);
+
+    const r = await publicarDoAcervo({
+      chave: 'k',
+      deps: DEPS_OK(midiaDir, { publicadosHoje: 9999 }),
+    });
+
+    assert.equal(r.motivo, MOTIVOS_PUBLICACAO.LIMITE);
+  });
+});
+
+test('publicar marca publicadoEm e mediaId no acervo (CA-6)', async () => {
+  await comAcervo(async (midiaDir) => {
+    registrarNoAcervo(midiaDir, 'k', REGISTRO);
+
+    const canal = {
+      async publicar() {
+        return { publicado: true, motivo: null, mediaId: 'media-9' };
+      },
+    };
+
+    const r = await publicarDoAcervo({ chave: 'k', deps: DEPS_OK(midiaDir, { canal }) });
+    assert.equal(r.publicado, true);
+
+    const item = buscarNoAcervo(midiaDir, 'k');
+    assert.ok(item.publicadoEm, 'marcou a data da publicação');
+    assert.equal(item.mediaId, 'media-9');
+    assert.equal(contarPublicacoesDoDia(midiaDir, Date.now() - 60_000), 1, 'conta no dia');
+
+    // Segunda tentativa: agora é recusada pelo dedup.
+    const segunda = await publicarDoAcervo({ chave: 'k', deps: DEPS_OK(midiaDir, { canal }) });
+    assert.equal(segunda.motivo, MOTIVOS_PUBLICACAO.JA_PUBLICADO);
+  });
+});
+
+test('contarPublicacoesDoDia ignora o que é anterior à janela', async () => {
+  await comAcervo(async (midiaDir) => {
+    registrarNoAcervo(midiaDir, 'velho', REGISTRO);
+    marcarPublicado(midiaDir, 'velho', { quando: '2020-01-01T00:00:00.000Z' });
+
+    assert.equal(contarPublicacoesDoDia(midiaDir, Date.now() - 86_400_000), 0);
+    assert.equal(contarPublicacoesDoDia(midiaDir, '2020-01-01 00:00:00'), 1, 'formato SQLite também');
+  });
+});
+
 

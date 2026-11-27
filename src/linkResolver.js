@@ -321,6 +321,20 @@ function scoreGaleria(url) {
  * @param {string} urlProduto URL canônica do produto
  * @returns {Promise<{ base64: string, origem: string }|null>}
  */
+/** Decodifica as entidades HTML mais comuns de um título (og:title/title). */
+function decodificarEntidades(texto) {
+  const mapa = {
+    '&amp;': '&',
+    '&quot;': '"',
+    '&#39;': "'",
+    '&apos;': "'",
+    '&lt;': '<',
+    '&gt;': '>',
+    '&nbsp;': ' ',
+  };
+  return String(texto || '').replace(/&(amp|quot|#39|apos|lt|gt|nbsp);/g, (m) => mapa[m] || m);
+}
+
 export async function extrairImagemProduto(urlProduto) {
   return extrairImagemDaPagina(urlProduto, { permitirGaleria: false });
 }
@@ -504,6 +518,18 @@ async function extrairImagemDaPagina(urlProduto, { permitirGaleria }) {
       return null;
     }
 
+    /**
+     * Título da página (og:title, senão <title>) — vai para o criativo do story.
+     * Sai do MESMO HTML já baixado para a imagem: nenhum request extra.
+     */
+    const tituloPagina = decodificarEntidades(
+      (
+        html.match(/<meta[^>]+(?:property|name)=["']og:title["'][^>]+content=["']([^"']+)["']/i) ||
+        html.match(/<title[^>]*>([^<]{1,200})<\/title>/i) ||
+        []
+      )[1] || '',
+    ).trim();
+
     /** Absolutiza a URL, baixa (com upgrade) e registra a origem. */
     const tentar = async (url, rotulo) => {
       let alvo = url;
@@ -516,7 +542,7 @@ async function extrairImagemDaPagina(urlProduto, { permitirGaleria }) {
       console.log(
         `   🖼️  Foto do produto [${final}] (${Math.round(baixada.bytes / 1024)} KB) — ${alvo.slice(0, 76)}`,
       );
-      return { base64: baixada.dataUrl, origem: final };
+      return { base64: baixada.dataUrl, origem: final, titulo: tituloPagina };
     };
 
     if (urlImagem) {

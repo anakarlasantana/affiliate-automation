@@ -57,6 +57,8 @@ import {
   resumoLojas,
 } from "./affiliates/index.js";
 import { SendQueue } from "./sendQueue.js";
+import { registrarOferta } from "./oferta.js";
+import { extrairPreco } from "./midia/preco.js";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -467,6 +469,24 @@ async function processarOferta(
     const primeiraLinha = (
       mensagemFinal.split("\n").find((l) => l.trim()) || ""
     ).trim();
+    // Registra a oferta para o Instagram (FEAT-009): link curto sempre, mídia
+    // composta só com foto real. Falha aqui NUNCA derruba o envio no WhatsApp.
+    try {
+      const chaveAcervo = chaveProduto(urlLimpa) || chaveProduto(meuLink || '');
+      const registro = await registrarOferta({
+        chave: chaveAcervo,
+        link: meuLink,
+        preco: extrairPreco(mensagemFinal)?.atual,
+        titulo: primeiraLinha,
+        imagemBase64,
+        placeholder: origemFoto === 'placeholder',
+      });
+      if (registro?.acervo) console.log(`   📸 Story pronto no acervo: ${registro.chave}`);
+      else if (registro?.motivo) console.log(`   📸 Sem story (${registro.motivo})`);
+    } catch (erro) {
+      console.warn(`   ⚠️  Registro para publicação falhou (segue sem story): ${erro.message}`);
+    }
+
     filaEnvio.enqueue({
       mensagemFinal,
       urlLimpa,

@@ -37,21 +37,66 @@ export function listarChavesDoAcervo(midiaDir) {
   return Object.keys(carregarAcervo(midiaDir));
 }
 
+/** Salva o mapa inteiro (usado por registrar e marcar). */
+function salvarAcervo(midiaDir, mapa) {
+  fs.mkdirSync(midiaDir, { recursive: true });
+  fs.writeFileSync(caminhoAcervo(midiaDir), `${JSON.stringify(mapa, null, 2)}\n`);
+  return mapa;
+}
+
 /** Registra (ou atualiza) a mídia de uma chave. Devolve o mapa resultante. */
 export function registrarNoAcervo(midiaDir, chave, registro = {}) {
   if (!chave) throw new Error('chave obrigatória');
   if (!registro.arquivo) throw new Error('arquivo obrigatório');
 
   const mapa = carregarAcervo(midiaDir);
+  const anterior = mapa[chave] || {};
+
   mapa[chave] = {
     arquivo: String(registro.arquivo),
     link: registro.link || null,
     preco: Number.isFinite(Number(registro.preco)) ? Number(registro.preco) : null,
     titulo: registro.titulo || '',
     criado: registro.criado || new Date().toISOString(),
+    // Re-registrar a mídia NÃO pode apagar o histórico de publicação.
+    ...(anterior.publicadoEm ? { publicadoEm: anterior.publicadoEm } : {}),
+    ...(anterior.mediaId ? { mediaId: anterior.mediaId } : {}),
   };
 
-  fs.mkdirSync(midiaDir, { recursive: true });
-  fs.writeFileSync(caminhoAcervo(midiaDir), `${JSON.stringify(mapa, null, 2)}\n`);
-  return mapa;
+  return salvarAcervo(midiaDir, mapa);
+}
+
+/**
+ * Marca a chave como publicada no Instagram (dedup e limite diário leem daqui).
+ * Só marca chave existente — publicar algo fora do acervo é erro de fluxo.
+ */
+export function marcarPublicado(midiaDir, chave, { mediaId = null, quando } = {}) {
+  const mapa = carregarAcervo(midiaDir);
+  if (!mapa[chave]) return null;
+
+  mapa[chave] = {
+    ...mapa[chave],
+    publicadoEm: quando || new Date().toISOString(),
+    ...(mediaId ? { mediaId } : {}),
+  };
+
+  salvarAcervo(midiaDir, mapa);
+  return mapa[chave];
+}
+
+/**
+ * Quantas chaves do acervo foram publicadas desde `desde`.
+ * `desde` aceita ISO ou o formato do SQLite ('YYYY-MM-DD HH:MM:SS', em UTC).
+ */
+export function contarPublicacoesDoDia(midiaDir, desde) {
+  let base = Number(desde);
+  if (!Number.isFinite(base)) {
+    base = Date.parse(`${String(desde || '').replace(' ', 'T')}Z`);
+  }
+  if (!Number.isFinite(base)) return 0;
+
+  return Object.values(carregarAcervo(midiaDir)).filter((registro) => {
+    const t = Date.parse(registro.publicadoEm || '');
+    return Number.isFinite(t) && t >= base;
+  }).length;
 }
