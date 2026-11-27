@@ -61,6 +61,8 @@ import {
 } from "./affiliates/index.js";
 import { SendQueue } from "./sendQueue.js";
 import { registrarOferta } from "./oferta.js";
+import { criarPublicadorAutomatico } from "./publicacao/automatica.js";
+import { garantirServidorDeMidia } from "./publicacao/servidor-interno.js";
 import {
   adquirirTrava,
   deveEncerrarPorStatus,
@@ -724,6 +726,10 @@ function limparRestosChrome() {
 /** Status do wppconnect traduzido para o que significa na prática. */
 /** Marca se a sessão chegou a conectar — separa "falhou no boot" de "caiu depois". */
 let whatsappConectado = false;
+
+/** Servidor de mídia que este processo subiu (FEAT-012 · CA-7) e o ciclo do IG. */
+let servidorMidiaFilho = null;
+let pararPublicacaoIg = null;
 
 function traduzirStatus(status) {
   const mapa = {
@@ -1714,6 +1720,18 @@ async function main() {
 
   // Retoma envios que ficaram pendentes de execucoes anteriores
   filaEnvio.restaurarPendentes({ wppClient });
+
+  // FEAT-012: o Instagram passa a operar junto com o WhatsApp. Sobe o servidor
+  // de mídia (a Meta precisa baixar o JPEG por uma URL pública) e liga o ciclo
+  // automático. Se a porta já estiver ocupada, usa o servidor existente.
+  const midia = await garantirServidorDeMidia({
+    avisar: (msg) => console.log(`   ${msg}`),
+  });
+  servidorMidiaFilho = midia?.filho || null;
+
+  pararPublicacaoIg = criarPublicadorAutomatico({
+    avisar: (msg) => console.log(`   ${msg}`),
+  }).iniciar();
 }
 
 /** Encerramento limpo: fecha o cliente, mata o Chrome e limpa locks órfãos. */
@@ -1726,6 +1744,14 @@ function encerrar(motivo, codigo = 0) {
     // cliente já morto
   }
   limparRestosChrome();
+  // Encerra o que este processo levantou junto (FEAT-012): o ciclo do Instagram
+  // e o servidor de mídia interno, se foi ele que subiu.
+  try {
+    pararPublicacaoIg?.();
+    servidorMidiaFilho?.kill?.();
+  } catch {
+    // já encerrados
+  }
   // Libera a trava mesmo em saída forçada: trava órfã bloquearia o próximo boot.
   liberarTrava({ diretorio: TOKENS_DIR });
   setTimeout(() => process.exit(codigo), 1500).unref();

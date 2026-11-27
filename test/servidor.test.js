@@ -317,3 +317,52 @@ test('FEAT-011 CA-6: chavePublicadaRecente ignora composto não publicado', () =
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test('FEAT-012 CA-7: porta ocupada NÃO sobe servidor duplicado', async () => {
+  const { decidirServidorInterno, garantirServidorDeMidia, portaOcupada } =
+    await import('../src/publicacao/servidor-interno.js');
+
+  assert.deepEqual(decidirServidorInterno({ portaEmUso: true }), {
+    subir: false,
+    motivo: 'porta-ocupada',
+  });
+  assert.deepEqual(decidirServidorInterno({}), { subir: true, motivo: null });
+  assert.equal(await portaOcupada(3000, { conectar: async () => true }), true);
+
+  let spawnChamado = false;
+  const r = await garantirServidorDeMidia({
+    porta: 3999,
+    conectar: async () => true,
+    spawn: () => {
+      spawnChamado = true;
+      return {};
+    },
+    cfg: { publicacao: { porta: 3999 }, caminhos: { root: process.cwd() } },
+    avisar: () => {},
+  });
+
+  assert.equal(r.proprio, false);
+  assert.equal(spawnChamado, false, 'não pode duplicar servidor');
+});
+
+test('FEAT-012 CA-7: porta livre sobe o servidor interno', async () => {
+  const { garantirServidorDeMidia } = await import(
+    '../src/publicacao/servidor-interno.js'
+  );
+
+  let chamadas = 0;
+  const r = await garantirServidorDeMidia({
+    porta: 3998,
+    // 1ª checagem: livre. Depois de subir: ocupada (servidor no ar).
+    conectar: async () => {
+      chamadas += 1;
+      return chamadas > 1;
+    },
+    spawn: () => ({ pid: 123, exitCode: null }),
+    cfg: { publicacao: { porta: 3998 }, caminhos: { root: process.cwd() } },
+    avisar: () => {},
+  });
+
+  assert.equal(r.proprio, true);
+  assert.equal(r.filho.pid, 123);
+});
