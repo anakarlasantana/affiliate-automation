@@ -83,9 +83,30 @@ Com o harness: `ai build debug <taskId>` e, se virar correção recorrente,
 
 ```bash
 npm run doctor        # diagnóstico completo
-npm run status        # fila persistente + credenciais faltantes
+npm run status        # fila persistente + credenciais + painel do Instagram
 sudo journalctl -u affiliate-automation -f     # logs em produção (systemd)
+tail -f logs/app.log | grep '\[ig\]'           # só o Instagram (preflight, container, publicado)
 ```
+
+### Parar e reiniciar
+
+A aplicação são **três coisas**: o processo do app, o **servidor de mídia** (filho, porta 3000) e os
+**Chromes** do perfil. A trava `tokens/app.lock` guarda o pid do dono do perfil — uma instância por vez.
+
+```bash
+# local / primeiro plano
+kill $(head -1 tokens/app.lock)     # SIGTERM: fecha o WhatsApp, mata a mídia filha, libera a trava
+npm start                           # volta preso ao terminal (Ctrl+C funciona)
+
+# travou no shutdown
+kill -9 $(head -1 tokens/app.lock); pkill -f 'node src/app.js'; rm -f tokens/app.lock
+
+# servidor (systemd)
+sudo systemctl stop affiliate-automation
+sudo systemctl restart affiliate-automation
+```
+
+Ver quem está no ar: `pgrep -af 'src/app.js'` · `cat tokens/app.lock` · `ss -ltnp | grep :3000`.
 
 - **systemd:** unit pronta em `deploy/affiliate-automation.service`
   (`Restart=always`, `RestartSec=30`, `KillMode=control-group` para o Chrome

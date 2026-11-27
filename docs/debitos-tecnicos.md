@@ -115,3 +115,20 @@ serem publicados errados, mas **as fotos originais não existem mais** — não 
 recomponíveis.
 
 **Decisão:** apagar os arquivos (liberar disco) ou manter como histórico.
+
+---
+
+## DT-006 · `logs/app.log` cresce sem rotação
+
+**Status:** aberto — descoberto ao revisar a documentação.
+
+O app espelha **tudo** em `logs/app.log` (`espelharLogsEmArquivo()`), inclusive o log do Instagram.
+Num dia de operação normal o arquivo passa de 3 mil linhas; nada o rotaciona, então ele cresce
+indefinidamente e ocupa disco no VPS.
+
+**Correção:** `logrotate` (diário, 7 cópias, `compress`) **ou** limite no unit
+(`SystemMaxUse=` no journal não cobre arquivo em disco). Alternativa simples: `logs/app.log` com
+`copytruncate` no logrotate, já que o app escreve com `appendFileSync`.
+
+**Impacto:** baixo no curto prazo (disco do VPS tem 41 G livres), alto no longo (um ano sem rotação
+são centenas de MB e um `grep` lento na hora do incidente).

@@ -112,3 +112,28 @@ Em aberto hoje:
 - **DT-003** — URL pública efêmera (túnel ngrok): quando muda, a mídia e a bio caem.
 - **DT-004** — `app.js` sem teste de integração (o bug de TDZ passou por 181 testes).
 - **DT-005** — 22 stories em quarentena sem foto original (decisão: apagar ou manter).
+
+## Fluxo do Instagram (FEAT-011 a FEAT-014)
+
+```
+oferta ouvida (app.js)
+   ├─ converterParaAfiliado() ............ nosso link
+   ├─ foto real + preco (origem vence o texto)
+   └─ registrarOferta() .................. src/oferta.js
+        ├─ go-destinos.json : chave -> link de afiliado
+        ├─ story 9:16  -> data/midia/<hash>.jpg      (chave `meli-MLB1`)
+        └─ post  4:5   -> data/midia/<hash>-post.jpg (chave `meli-MLB1:post`)
+
+ciclo automatico (src/publicacao/automatica.js)
+   ├─ servidor de midia interno (src/servidor.js como FILHO, :3000 loopback)
+   ├─ preflight: /health + /midia/<arquivo> (tipo certo por formato)
+   ├─ escolha: story (12/dia) · post (6/dia, 1 a cada 2 stories) · reel (adiado)
+   └─ publica -> canal Instagram -> marca publicadoEm + mediaId no acervo
+
+visitante
+   └─ GET /go/<chave> -> 302 link de afiliado | GET /go -> ultimo publicado
+         (Caddy termina o HTTPS na VPS; a porta 3000 fica fechada)
+```
+
+A legenda (FEAT-014) é montada por regra: gancho ≤125 chars com produto e preço, desconto calculado,
+cupom quando existir, CTA coerente com `GO_DESTINO` e até 10 hashtags.

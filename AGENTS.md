@@ -72,6 +72,9 @@ npm run verify:api     # os dois acima (é o que `ai verify api` executa)
 npm run servidor       # sobe /go/<chave>, /midia/<arquivo> e o webhook do Direct
 npm run ensaiar -- <url> --preco 199   # compõe o story e grava no acervo (NÃO publica)
 npm run publicar -- <chave>            # publica 1 story do acervo (exige PUBLICAR_STORIES=1)
+npm run publicar:feed -- <chave> --foto <arquivo>   # publica 1 post no feed (4:5; --seco só compõe)
+npm run recompor                       # regera o acervo com as regras atuais (--seco, --quarentena)
+npm run deploy:vps -- --host <ip>      # deploy SIMULADO na VPS (--apply executa; --rollback volta)
 ```
 
 
