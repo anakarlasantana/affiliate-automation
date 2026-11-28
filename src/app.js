@@ -445,6 +445,25 @@ async function processarOferta(
         console.log(
           `   🖼️  foto da mensagem reassumida (plano B) — site/API não entregaram imagem.`,
         );
+        console.log(
+          linhaDeFluxo({
+            id: idFoto,
+            etapa: "plano-b",
+            status: "usado",
+            detalhe: `fonte=${origemFotoDaMensagem}`,
+          }),
+        );
+      } else {
+        // FEAT-017: sem foto da mensagem, o plano B não tem o que usar — e isso
+        // precisa aparecer (antes, a oferta caía em placeholder sem explicação).
+        console.log(
+          linhaDeFluxo({
+            id: idFoto,
+            etapa: "plano-b",
+            status: "indisponivel",
+            detalhe: "mencao sem foto real — segue para placeholder",
+          }),
+        );
       }
     }
     if (!imagemBase64) {
@@ -1258,8 +1277,18 @@ async function iniciarWhatsApp() {
 
         if (!imagemBase64) {
           console.warn(
-            "   ⚠️  Foto da mensagem indisponível (body miniatura/inválido e download falhou) — fallback do site será usado." +
+            "   ⚠️  Foto da mensagem indisponível (body miniatura/inválido e download falhou) - fallback do site será usado." +
               ` [type=${msg.type}, isMedia=${msg.isMedia}, mimetype=${msg.mimetype}]`,
+          );
+          // FEAT-017: registra a ETAPA que falhou. Sem isso, a oferta cai em
+          // placeholder e o log nao diz se foi download, body ou midia ausente.
+          console.log(
+            linhaDeFluxo({
+              id: idDaOferta(texto, chatId),
+              etapa: 'download-mensagem',
+              status: 'falhou',
+              detalhe: `type=${msg.type} body=${String(msg.body || '').length}B sem-foto`,
+            }),
           );
         }
       } else if (typeof msg.mimetype === "string" && /^image\//i.test(msg.mimetype)) {
