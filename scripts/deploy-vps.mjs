@@ -58,7 +58,7 @@ function ssh(comando, { silencioso = false } = {}) {
     log(`    ssh ${comando.slice(0, 130)}${comando.length > 130 ? '…' : ''}`);
     return '';
   }
-  return execFileSync(
+  const saida = execFileSync(
     'ssh',
     [
       '-i',
@@ -70,8 +70,12 @@ function ssh(comando, { silencioso = false } = {}) {
       `${usuario}@${host}`,
       comando,
     ],
-    { encoding: 'utf8', stdio: silencioso ? 'pipe' : 'inherit' },
+    // ARMADILHA: com stdio 'inherit' o execFileSync devolve null — a leitura do
+    // .env remoto vinha vazia e a comparação mentia ("faltam 2 chaves" quando
+    // faltavam 24). Quem precisa da saída pede `silencioso`, que captura o pipe.
+    { encoding: 'utf8', stdio: silencioso ? ['ignore', 'pipe', 'pipe'] : 'inherit' },
   );
+  return silencioso ? saida ?? '' : '';
 }
 
 if (!host) {
@@ -148,17 +152,37 @@ ssh(
 );
 
 passo(4, 'variáveis: só aponta o que falta (não sobrescreve o .env)');
-const envServidor = (aplicar && ssh(`sudo -n cat ${alvo}/.env`, { silencioso: true })) || '';
-const envExemplo = fs.readFileSync(path.join(RAIZ, '.env.example'), 'utf8');
-const faltam = aplicar ? chavesFaltantes(envServidor, envExemplo) : [];
-if (!aplicar) {
-  log('    (no --apply: compara .env do servidor com .env.example e lista o que falta)');
-} else if (faltam.length) {
-  log(`    ⚠️  ${faltam.length} chave(s) faltando no .env do servidor:`);
-  log(blocoParaColar(faltam).replace(/^/gm, '    '));
-  log('    preencha o .env e rode de novo — o deploy NÃO copia o .env');
+let faltam = [];
+if (aplicar) {
+  // Leitura do .env do servidor tem de ser CONFIÁVEL: se vier vazia, o diff
+  // mentiria (foi o bug de 27/11 — reportou 2 chaves quando faltavam 24).
+  const envServidor = ssh(`sudo -n cat ${alvo}/.env`, { silencioso: true });
+  if (!String(envServidor || '').trim()) {
+    console.error(
+      '⛔ não consegui ler o .env do servidor — abortando ANTES de mexer em qualquer coisa',
+    );
+    process.exit(3);
+  }
+  const envExemplo = fs.readFileSync(path.join(RAIZ, '.env.example'), 'utf8');
+  faltam = chavesFaltantes(envServidor, envExemplo);
+  if (faltam.length) {
+    log(`    ⚠️  ${faltam.length} chave(s) faltando no .env do servidor:`);
+    log(blocoParaColar(faltam).replace(/^/gm, '    '));
+    log('    preencha o .env da VPS e rode de novo — o deploy NÃO copia o .env');
+    // As chaves de mídia/Instagram são obrigatórias: sem elas o app sobe e não
+    // publica. Parar aqui evita "deploy verde" com configuração incompleta.
+    const obrigatorias = faltam.filter((c) =>
+      /^(PUBLIC_BASE_URL|GO_BASE_URL|IG_USER_ID|IG_ACCESS_TOKEN|CHROME_PATH)$/.test(c),
+    );
+    if (obrigatorias.length) {
+      console.error(`⛔ faltam chaves obrigatórias: ${obrigatorias.join(', ')}`);
+      process.exit(2);
+    }
+  } else {
+    log('    ✅ nenhuma chave faltando');
+  }
 } else {
-  log('    ✅ nenhuma chave faltando');
+  log('    (no --apply: compara .env do servidor com .env.example e lista o que falta)');
 }
 
 passo(5, 'Caddyfile com o host de mídia');

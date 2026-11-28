@@ -56,18 +56,30 @@ export function validarAssets(raiz) {
   return { ok: faltando.length === 0, faltando };
 }
 
-/** Lê as chaves `CHAVE=` de um texto de .env (ignora comentários/vazios). */
-export function chavesDoEnv(texto) {
+/**
+ * Lê as chaves `CHAVE=` de um texto de .env.
+ *
+ * `aceitarComentadas` existe para o **.env.example**, onde a chave nova é
+ * documentada como `#CHAVE=valor` (sugestão). No `.env` real, comentário NÃO é
+ * configuração — lá a chave comentada continua faltando.
+ *
+ * POR QUÊ: sem isso, `chavesFaltantes()` comparava só as linhas ativas do
+ * exemplo e reportava "faltam 2" quando na verdade faltavam 24 (bloco inteiro do
+ * Instagram estava comentado no exemplo).
+ */
+export function chavesDoEnv(texto, { aceitarComentadas = false } = {}) {
   return String(texto || '')
     .split('\n')
     .map((linha) => linha.trim())
-    .filter((linha) => linha && !linha.startsWith('#'))
-    .map((linha) => linha.split('=')[0].trim())
-    .filter((chave) => /^[A-Z][A-Z0-9_]*$/.test(chave));
+    .filter((linha) => linha && (aceitarComentadas || !linha.startsWith('#')))
+    .map((linha) => linha.replace(/^#+\s*/, ''))
+    .filter((linha) => /^[A-Z][A-Z0-9_]*=/.test(linha))
+    .map((linha) => linha.split('=')[0].trim());
 }
 
 /**
- * Chaves que existem no `.env.example` e faltam no `.env` do servidor.
+ * Chaves que existem no `.env.example` (ativas **ou** comentadas) e faltam no
+ * `.env` do servidor.
  *
  * POR QUÊ não copiar o exemplo por cima: `cp .env.example .env` apaga as
  * credenciais de produção. Aqui só se APONTA o que falta.
@@ -77,7 +89,12 @@ export function chavesDoEnv(texto) {
  */
 export function chavesFaltantes(envDoServidor, envExemplo) {
   const atuais = new Set(chavesDoEnv(envDoServidor));
-  return chavesDoEnv(envExemplo).filter((chave) => !atuais.has(chave));
+  // `.env.example` documenta a mesma chave em mais de um bloco (ex.: MAX_REELS_DIA
+  // perto do feed e no bloco de kill switches). Deduplica para a lista não
+  // repetir item e o operador não achar que são variáveis diferentes.
+  return [...new Set(chavesDoEnv(envExemplo, { aceitarComentadas: true }))].filter(
+    (chave) => !atuais.has(chave),
+  );
 }
 
 /**

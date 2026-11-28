@@ -170,3 +170,40 @@ test('CA-9: o Caddyfile encaminha para o loopback, sem expor o app', () => {
   assert.match(caddy, /SEU_HOST_AQUI/);
   assert.doesNotMatch(caddy, /:80\s|:443\s/, 'portas vêm do hostname, não fixas');
 });
+
+/* ===== regressão: o diff do .env não pode mentir ===== */
+
+test('CA-2: chave COMENTADA no exemplo conta como faltante', () => {
+  // Bug de 27/11: o bloco do Instagram estava todo `#CHAVE=` no .env.example e
+  // o diff reportou 2 chaves quando faltavam 24.
+  const servidor = 'SHOPEE_APP_ID=abc\n';
+  const exemplo = 'SHOPEE_APP_ID=\n#IG_USER_ID=\n#PUBLIC_BASE_URL=https://x\n';
+
+  assert.deepEqual(chavesFaltantes(servidor, exemplo), [
+    'IG_USER_ID',
+    'PUBLIC_BASE_URL',
+  ]);
+});
+
+test('CA-2: comentário no .env REAL não vale como configuração', () => {
+  assert.deepEqual(chavesDoEnv('#IG_USER_ID=\nSHOPEE_APP_ID=x\n'), ['SHOPEE_APP_ID']);
+});
+
+test('CA-2: chave repetida no exemplo aparece uma vez só', () => {
+  const exemplo = 'MAX_REELS_DIA=1\n#MAX_REELS_DIA=1\n';
+  assert.deepEqual(chavesFaltantes('', exemplo), ['MAX_REELS_DIA']);
+});
+
+test('CA-2: o .env.example do repositório cobre as chaves obrigatórias', () => {
+  const exemplo = fs.readFileSync(path.join(RAIZ, '.env.example'), 'utf8');
+  const chaves = chavesDoEnv(exemplo, { aceitarComentadas: true });
+  for (const obrigatoria of [
+    'PUBLIC_BASE_URL',
+    'GO_BASE_URL',
+    'IG_USER_ID',
+    'IG_ACCESS_TOKEN',
+    'CHROME_PATH',
+  ]) {
+    assert.ok(chaves.includes(obrigatoria), `exemplo precisa documentar ${obrigatoria}`);
+  }
+});
