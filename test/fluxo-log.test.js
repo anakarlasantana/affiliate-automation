@@ -7,6 +7,9 @@
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+
+const lerArquivo = (url) => fs.readFileSync(url, 'utf8');
 
 import {
   TAG,
@@ -76,4 +79,36 @@ test('CA-3: motivoInvalida devolve a causa, nunca lança', () => {
 test('CA-3: imagem vazia após a fila é reportada como sem-imagem', () => {
   // cenário real: restaurarPendentes trouxe base64 truncado/nulo
   assert.equal(motivoInvalida(() => ({ valido: false }), null), 'sem-imagem');
+});
+
+/* ============ regressão: TDZ é o erro que mais quebrou produção ============ */
+
+/** Le app.js como texto: ele nao e importavel (boota tudo no import). */
+function lerApp() {
+  return lerArquivo(new URL('../src/app.js', import.meta.url));
+}
+
+test('CA-8: o resumo do fluxo vem DEPOIS de precoResolvido (TDZ)', () => {
+  // Três vezes em 28/11 um bloco que usa `const` antes da declaração derrubou a
+  // oferta inteira: "Cannot access 'mensagemFinal'/'precoResolvido' before
+  // initialization". node --check não pega TDZ e app.js não é importável.
+  const app = lerApp();
+
+  const declaracao = app.indexOf('const precoResolvido');
+  const uso = app.indexOf('resumoDoFluxo({');
+
+  assert.ok(declaracao > 0, 'precoResolvido precisa ser declarado');
+  assert.ok(uso > 0, 'o resumo do fluxo precisa existir');
+  assert.ok(
+    uso > declaracao,
+    'resumoDoFluxo usa precoResolvido — precisa vir depois da declaração',
+  );
+});
+
+test('CA-8: o enfileiramento também vem depois de precoResolvido', () => {
+  const app = lerApp();
+  assert.ok(
+    app.indexOf('filaEnvio.enqueue(') > app.indexOf('const precoResolvido'),
+    'enqueue usa precoResolvido/tituloProduto — ordem obrigatória',
+  );
 });

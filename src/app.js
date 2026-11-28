@@ -476,25 +476,14 @@ async function processarOferta(
     }
 
     // CA-8: uma linha por oferta dizendo de onde veio a foto e em que tamanho.
+    // O resumo completo (com preço) vai DEPOIS de `precoResolvido`: aqui usá-lo
+    // quebrava com "Cannot access 'precoResolvido' before initialization".
     console.log(
       `   ${linhaDaFoto(
         { base64: imagemBase64, origem: origemFoto },
         dimensoesImagem,
         (b64) => ({ kb: Math.round((String(b64).length * 3) / 4 / 1024) }),
       )}`,
-    );
-    // FEAT-017: resumo do fluxo — permite filtrar UMA oferta inteira no servidor
-    // com `grep '#<id>'` e ver onde ela degradou.
-    console.log(
-      resumoDoFluxo({
-        id: idFoto,
-        etapas: {
-          foto: imagemBase64 ? origemFoto : "nenhuma",
-          preco: precoResolvido?.atual ?? "sem-preco",
-          pagina: pagina?.preco ? "com-preco" : "sem-preco",
-          story: origemFoto === "placeholder" ? "nao" : "sim",
-        },
-      }),
     );
 
     // Identidade do produto: usada no dedup, no link curto e na API de preço.
@@ -607,6 +596,21 @@ async function processarOferta(
     } catch (erro) {
       console.warn(`   ⚠️  Registro para publicação falhou (segue sem story): ${erro.message}`);
     }
+
+    // FEAT-017: resumo do fluxo — permite filtrar UMA oferta inteira no servidor
+    // com `grep '#<id>'`. Fica AQUI (depois de `precoResolvido`): antes dele o
+    // `const` está em TDZ e a oferta inteira era perdida.
+    console.log(
+      resumoDoFluxo({
+        id: idFoto,
+        etapas: {
+          foto: imagemBase64 ? origemFoto : "nenhuma",
+          preco: precoResolvido?.atual ?? "sem-preco",
+          pagina: pagina?.preco ? "com-preco" : "sem-preco",
+          story: origemFoto === "placeholder" ? "nao" : "sim",
+        },
+      }),
+    );
 
     filaEnvio.enqueue({
       mensagemFinal,
