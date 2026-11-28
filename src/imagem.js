@@ -9,6 +9,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import zlib from 'node:zlib';
 import { DATA_DIR, PLACEHOLDER_PATH } from './config.js';
+import { ehFrameMorto, frameDoErro } from './whatsapp/frame-vivo.js';
 
 /** Limite do WhatsApp para legenda de foto (~1024 chars). */
 export const LIMITE_LEGENDA_FOTO = 1000;
@@ -236,6 +237,21 @@ export async function baixarMidiaComRetry(
       if (/no media found/i.test(msg)) {
         console.warn(`   Midia ainda nao disponivel na store (${rotulo || 's/rotulo'}) — tentando re-hidratar.`);
         return { base64: null, tentativas: tentativa, semMidia: true };
+      }
+      // FEAT-018: frame morto (pagina recarregou). Repetir no MESMO frame gasta
+      // ~50 s por tentativa e sempre falha — "Attempted to use detached Frame".
+      // Quem resolve e recriar/re-hidratar a pagina, no chamador.
+      if (ehFrameMorto(e)) {
+        console.warn(
+          `   Frame do WhatsApp morreu (${frameDoErro(e) || 'sem-id'}) — ` +
+            `abortando as tentativas; e preciso re-hidratar a pagina.`,
+        );
+        return {
+          base64: null,
+          tentativas: tentativa,
+          frameMorto: true,
+          frame: frameDoErro(e),
+        };
       }
       console.warn(`   Download midia tentativa ${tentativa}/${MAX_TENTATIVAS} falhou: ${msg}`);
     }
