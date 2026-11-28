@@ -46,11 +46,22 @@ function valorDeDesconto(texto, indice, tamanho) {
   // reconhecido como desconto. O "de" de "cupom de" fica no próprio padrão
   // (senão "acima de" perderia o "de" que o identifica).
   const antesLimpo = antes.replace(/r\$\s*$/, '').trimEnd();
+  // FEAT-021: cauda sem separador para casar a etiqueta ("cupom na mao -", "... —")
+  const cauda = antesLimpo.replace(/[-–—:.,\s]+$/, '');
+  // Lista curada com redacoes REAIS (FEAT-021). Cada item veio de um caso que
+  // passou pela guarda antiga: "CUPOM NA MAO" (Promobit 28/11), "use o cupom",
+  // "cupom de R$ N", "R$ N de desconto" e emoji de cupom na linha do valor.
   const marcaAntes =
-    /(?:off|cupom|desconto|desc\.?|economize|economia|no m[ií]nimo|acima\s+de)(?:\s+de)?\s*$/.test(
-      antesLimpo,
+    /(?:off|cupom|desconto|desc\.?|economize|economia|no m[ií]nimo|acima\s+de|cupom\s+na\s+m[aã]o|use\s+(?:o\s+)?cupom|com\s+(?:o\s+)?cupom|resgate\s+(?:o\s+)?cupom)(?:\s+de)?$/.test(
+      cauda,
     );
-  const marcaDepois = /^\s*(?:off|de\s+desconto|reais\s+off)\b/.test(depois);
+  // Depois do valor: "de desconto", "OFF", "reais off".
+  // Antes: a propria etiqueta de cupom (ex.: "CUPOM NA MAO - R$ 500").
+  const marcaDepois =
+    /^\s*(?:off|de\s+desconto|reais\s+off)\b/.test(depois) ||
+    // O separador pode ficar no FIM do trecho ("CUPOM NA MAO - ", "... — ", "...: "),
+    // entao ele entra ANTES do $ — sem isso o match falha e o valor passa.
+    /(?:cupom\s+na\s+m[aã]o|cupom)$/.test(cauda);
   return marcaAntes || marcaDepois;
 }
 

@@ -112,6 +112,12 @@ export async function resolverFotoDaOferta({
   fotoMensagem = null,
   origemMensagem = 'mensagem:download',
   preferirSite = false,
+  /**
+   * FEAT-021: quando `preferirSite` e verdadeiro (grupo em FONTES_FOTO_SOMENTE_SITE),
+   * o chamador pode desligar o plano B. Nesses grupos a foto da mensagem e o
+   * CARD DA MARCA -- manda-la ao feed e pior que usar o placeholder.
+   */
+  permitirPlanoB = true,
   buscarNoSite = async () => null,
   buscarNaApi = async () => null,
   placeholder = { arquivo: null, motivo: 'nao-informado' },
@@ -133,7 +139,9 @@ export async function resolverFotoDaOferta({
   if (preferirSite) fontes.push(['site', buscarNoSite]);
   else fontes.push(['site', buscarNoSite]);
   fontes.push(['api', buscarNaApi]);
-  if (preferirSite && daMensagem) fontes.push(['mensagem', async () => daMensagem]);
+  if (preferirSite && daMensagem && permitirPlanoB) {
+    fontes.push(['mensagem', async () => daMensagem]);
+  }
 
   for (const [nome, buscar] of fontes) {
     let achado = null;

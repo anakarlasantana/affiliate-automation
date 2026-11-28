@@ -72,6 +72,7 @@ import {
 } from "./instancia.js";
 import { resolverPreco } from "./midia/preco.js";
 import { linhaDaFoto } from "./midia/cascata-foto.js";
+import { avaliarOfertaParaStory } from "./midia/bloqueio-oferta.js";
 import { baixarMidiaForaDoNavegador, metadadosNaPagina } from "./whatsapp/midia-node.js";
 import { idDaOferta, linhaDeFluxo, motivoInvalida, resumoDoFluxo } from "./midia/fluxo-log.js";
 import fs from "node:fs";
@@ -440,7 +441,9 @@ async function processarOferta(
       // PLANO B (FEAT-017): antes de cair no placeholder, a foto da mensagem
       // volta — ela foi preterida pela regra FONTES_FOTO_SOMENTE_SITE, não
       // descartada. Sem isso, site bloqueado (captcha do ML) = placeholder.
-      if (fotoDaMensagem) {
+      // FEAT-021 CA-1: em grupo FONTES_FOTO_SOMENTE_SITE o plano B NAO volta —
+      // ali a foto da mensagem e o CARD DA MARCA. Site fora = placeholder.
+      if (fotoDaMensagem && !origemSoFotoSite(origem)) {
         imagemBase64 = fotoDaMensagem;
         origemFoto = origemFotoDaMensagem;
         console.log(
@@ -583,17 +586,33 @@ async function processarOferta(
     // Registra a oferta para o Instagram (FEAT-009): link curto sempre, mídia
     // composta só com foto real. Falha aqui NUNCA derruba o envio no WhatsApp.
     try {
-      const registro = await registrarOferta({
-        chave: chaveAcervo,
-        link: meuLink,
+      // FEAT-021: vitrine = o mergulhador escolheu o produto, o anunciante nao.
+      const veioDeVitrine = Boolean(resolverMergulhador(urlLimpa || ""));
+      const avaliacao = avaliarOfertaParaStory({
+        texto: mensagemFinal,
+        tituloProduto,
+        veioDeVitrine,
         preco: precoResolvido?.atual ?? null,
-        titulo: tituloProduto,
-        imagemBase64,
-        placeholder: origemFoto === 'placeholder',
       });
-      // Silencioso nos motivos esperados (`sem-chave`, `sem-foto`, `sem-preco`):
-      // são rotina em loja genérica e em oferta sem preço. Só o sucesso loga.
-      if (registro?.acervo) console.log(`   📸 Story pronto no acervo: ${registro.chave}`);
+      if (!avaliacao.story) {
+        console.log(
+          `   🚫 Story bloqueado: ${avaliacao.motivo} (segue no WhatsApp)`
+        );
+      }
+
+      if (avaliacao.story) {
+        const registro = await registrarOferta({
+          chave: chaveAcervo,
+          link: meuLink,
+          preco: precoResolvido?.atual ?? null,
+          titulo: tituloProduto,
+          imagemBase64,
+          placeholder: origemFoto === 'placeholder',
+        });
+        // Silencioso nos motivos esperados (`sem-chave`, `sem-foto`, `sem-preco`):
+        // são rotina em loja genérica e em oferta sem preço. Só o sucesso loga.
+        if (registro?.acervo) console.log(`   📸 Story pronto no acervo: ${registro.chave}`);
+      }
     } catch (erro) {
       console.warn(`   ⚠️  Registro para publicação falhou (segue sem story): ${erro.message}`);
     }

@@ -183,3 +183,37 @@ test('CA-2: foto persistida é reusada sem passar pelo site', async () => {
   assert.equal(r.base64, FOTO);
   assert.equal(consultouSite, false, 'não pode rebaixar a foto já resolvida');
 });
+
+/* ============ FEAT-021 CA-1/CA-2: foto estrita em grupo SO_SITE ============ */
+
+test('CA-1: grupo SO_SITE + site falhou + permitirPlanoB=false → placeholder', async () => {
+  const r = await resolverFotoDaOferta({
+    fotoMensagem: FOTO,          // card da marca, ja baixado
+    preferirSite: true,
+    permitirPlanoB: false,       // FEAT-021: nao volta
+    buscarNoSite: async () => null,
+    buscarNaApi: async () => null,
+    placeholder: {
+      arquivo: path.join(RAIZ, 'assets', 'placeholder-confira-produto.png'),
+      motivo: 'padrao',
+    },
+    dimensoes: () => ({ largura: 1080, altura: 1080 }),
+  });
+
+  assert.equal(r.origem, 'placeholder', 'o card da marca nao vai ao grupo');
+  assert.ok(r.base64, 'oferta mantida com o placeholder da aplicacao');
+});
+
+test('CA-2: fora de grupo SO_SITE o plano B continua valendo', async () => {
+  const r = await resolverFotoDaOferta({
+    fotoMensagem: FOTO,
+    preferirSite: true,
+    permitirPlanoB: true,        // default: FEAT-017 mantida
+    buscarNoSite: async () => null,
+    buscarNaApi: async () => null,
+    dimensoes: () => ({ largura: 1200, altura: 1200 }),
+  });
+
+  assert.equal(r.origem, 'mensagem:download');
+  assert.equal(r.base64, FOTO);
+});
