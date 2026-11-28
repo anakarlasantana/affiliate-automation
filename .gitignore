@@ -10,3 +10,8 @@ data/
 .harness/tests/
 .harness/rework/
 .harness/context/repo-map.md
+
+# Backups do .env NUNCA vão para o git: podem conter tokens (o .env puro já
+# está ignorado; sem isso um .env.bak.* com segredo entraria num `git add .`).
+.env.*
+!.env.example
