@@ -317,12 +317,15 @@ test('CA-6: com feed ativo, o ciclo publica o post quando não há story', async
 });
 
 test('CA-6: post no teto do dia não é publicado', async () => {
+  // Convenção do repo: teto 0 = ILIMITADO. Para testar o teto: 1 com 1 já
+  // publicado hoje (o contador vem de deps.contar).
   let chamou = false;
   const p = criarPublicadorAutomatico({
-    cfg: cfgDeTeste({ feedAtivo: true, maxPostsDia: 0 }),
+    cfg: cfgDeTeste({ feedAtivo: true, maxPostsDia: 1, maxStoriesDia: 0 }),
     deps: {
       carregar: acervoSóPost,
       preflight: preflightOk,
+      contar: (_dir, _desde, f) => ({ story: 0, post: 1, reel: 0 })[f] || 0,
       publicar: async () => ({ mediaId: '1' }),
       publicarPost: async () => {
         chamou = true;
@@ -334,7 +337,7 @@ test('CA-6: post no teto do dia não é publicado', async () => {
   const r = await p.ciclo();
 
   assert.equal(r.motivo, 'vazio');
-  assert.equal(chamou, false, 'MAX_POSTS_DIA=0 bloqueia o post');
+  assert.equal(chamou, false, 'post 1/1 do dia → no teto, não publica');
 });
 
 test('CA-1: story pendente tem prioridade sobre o post', async () => {

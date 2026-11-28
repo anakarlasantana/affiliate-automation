@@ -14,6 +14,7 @@
  */
 import config, { inicioDoDiaOperacional } from '../config.js';
 import { carregarAcervo, contarPublicacoesDoDia } from '../midia/acervo.js';
+import { escolherDoCiclo } from './escolha.js';
 import {
   publicarDoAcervo,
   publicarPostDoAcervo,
@@ -164,30 +165,17 @@ export function criarPublicadorAutomatico({ cfg = config, avisar = () => {}, dep
         `reel ${doDia.reel}/${cfg.publicacao.maxReelsDia} hoje`,
     );
 
-    const cabeStory =
-      Boolean(pendentes.story) && doDia.story < cfg.publicacao.maxStoriesDia;
-    const cabePost =
-      Boolean(pendentes.post) && doDia.post < cfg.publicacao.maxPostsDia;
-    const cabeReel =
-      Boolean(pendentes.reel) && doDia.reel < cfg.publicacao.maxReelsDia;
 
-    // INTERLEAVE: a cada N stories entra 1 post — feed mais ativo (post é
-    // permanente, story some em 24 h). `STORIES_POR_POST=0` volta à prioridade
-    // absoluta do story.
-    const razao = cfg.publicacao.storiesPorPost || 0;
-    const postDevido =
-      cabePost &&
-      (!cabeStory || (razao > 0 && doDia.story >= (doDia.post + 1) * razao));
-
-    const escolhido = postDevido
-      ? { formato: 'post', alvo: pendentes.post }
-      : cabeStory
-        ? { formato: 'story', alvo: pendentes.story }
-        : cabeReel
-          ? { formato: 'reel', alvo: pendentes.reel }
-          : cabePost
-            ? { formato: 'post', alvo: pendentes.post }
-            : null;
+    const escolhido = escolherDoCiclo({
+      pendentes,
+      doDia,
+      cfg: {
+        maxStoriesDia: cfg.publicacao.maxStoriesDia,
+        maxPostsDia: cfg.publicacao.maxPostsDia,
+        maxReelsDia: cfg.publicacao.maxReelsDia,
+        storiesPorPost: cfg.publicacao.storiesPorPost,
+      },
+    });
 
     if (!escolhido) {
       avisar(`📊 ${PREFIXO} Ciclo: nada a publicar (teto atingido ou fila vazia)`);
