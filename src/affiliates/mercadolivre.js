@@ -84,6 +84,26 @@ function aplicarTracking(urlDestino, affiliateId) {
   return url.toString();
 }
 
+/**
+ * Link da VITRINE PROPRIA com tracking de afiliado (FEAT-022).
+ *
+ * POR QUE existe: quando o produto extraido da vitrine de terceiro nao casa com
+ * o texto da oferta, o link de produto seria ALEATORIO. Melhor mandar o cliente
+ * para a nossa vitrine (onde ele escolhe) do que para um produto fake.
+ *
+ * @param {{affiliateId?:string, socialId?:string, aplicar?:Function}} [opcoes]
+ * @returns {string|null} URL da vitrine com tracking, ou null sem configuracao
+ */
+export function linkDaVitrinePropria({
+  affiliateId = config.afiliados.mercadolivre.affiliateId,
+  socialId = config.afiliados.mercadolivre.vitrine,
+  aplicar = aplicarTracking,
+} = {}) {
+  if (!affiliateId || !socialId) return null;
+  const base = `https://www.mercadolivre.com.br/social/${socialId}`;
+  return aplicar(base, affiliateId);
+}
+
 export class MercadoLivreProvider extends AffiliateProvider {
   static dominios = ['mercadolivre.com.br', 'mercadolivre.com', 'meli.la', 'mercadolibre.com'];
   static nome = 'MercadoLivre';

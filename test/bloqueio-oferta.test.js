@@ -95,3 +95,17 @@ test('pareceCupomSemProduto distingue cupom puro de oferta com produto', () => {
   assert.equal(pareceCupomSemProduto('Air fryer Mondial com cupom'), false);
   assert.equal(pareceCupomSemProduto('oferta do dia'), false);
 });
+
+/* ============ FEAT-022 CA-4: vitrine sem produto nao gera story ============ */
+
+test('CA-4: vitrine sem produto confirmado → story bloqueado, grupo segue', () => {
+  const r = avaliarOfertaParaStory({
+    texto: 'CUPOM NA MÃO pra garantir aquele alívio no carrinho',
+    tituloProduto: 'Case Starlink Mini Super IMS 88mm',
+    veioDeVitrine: true,
+    preco: 500,
+  });
+  assert.equal(r.story, false);
+  assert.equal(r.motivo, 'vitrine-sem-produto');
+  // A oferta NAO e descartada: quem decide o envio e o app.js (que usa a vitrine propria)
+});

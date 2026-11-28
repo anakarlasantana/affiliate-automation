@@ -73,6 +73,7 @@ import {
 import { resolverPreco } from "./midia/preco.js";
 import { linhaDaFoto } from "./midia/cascata-foto.js";
 import { avaliarOfertaParaStory } from "./midia/bloqueio-oferta.js";
+import { linkDaVitrinePropria } from "./affiliates/mercadolivre.js";
 import { baixarMidiaForaDoNavegador, metadadosNaPagina } from "./whatsapp/midia-node.js";
 import { idDaOferta, linhaDeFluxo, motivoInvalida, resumoDoFluxo } from "./midia/fluxo-log.js";
 import fs from "node:fs";
@@ -594,6 +595,24 @@ async function processarOferta(
         veioDeVitrine,
         preco: precoResolvido?.atual ?? null,
       });
+      // FEAT-022: vitrine de terceiro cujo produto nao casa com o texto ->
+      // o link de produto seria ALEATORIO. Usa a vitrine propria.
+      let linkFinal = meuLink;
+      let origemDoLink = "produto";
+      if (veioDeVitrine && !textoCitaProduto(mensagemFinal, tituloProduto)) {
+        const daVitrine = linkDaVitrinePropria();
+        if (daVitrine) {
+          linkFinal = daVitrine;
+          origemDoLink = "vitrine-propria";
+          console.log(
+            `   ↪ link da vitrine propria (produto do link nao casa com o texto)`
+          );
+        } else {
+          console.warn("   ⛔ vitrine-sem-ancora: sem MELI_SOCIAL_ID — oferta nao publicada");
+          return;
+        }
+      }
+
       if (!avaliacao.story) {
         console.log(
           `   🚫 Story bloqueado: ${avaliacao.motivo} (segue no WhatsApp)`
@@ -633,13 +652,13 @@ async function processarOferta(
     );
 
     filaEnvio.enqueue({
-      mensagemFinal,
+      mensagemFinal: mensagemFinal.replace(meuLink, linkFinal || meuLink),
       urlLimpa,
       chaveFinal,
       wppClient,
       imagemBase64,
       origemFoto,
-      meuLink,
+      meuLink: linkFinal || meuLink,
       loja: loja,
       titulo: primeiraLinha.slice(0, 80),
     });
