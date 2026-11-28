@@ -23,6 +23,16 @@ import crypto from 'node:crypto';
 export const HOST_MIDIA = 'https://mmg.whatsapp.net';
 
 /**
+ * Marcador interno para diferenciar timeout de "página devolveu null" em
+ * `metadadosNaPagina`. Fica no TOPO de propósito: um `const` declarado depois do
+ * uso estoura TDZ (o mesmo erro que derrubou o pipeline em 27/11 e 28/11).
+ */
+const SIMBOLO_TIMEOUT = Symbol('timeout-metadados');
+
+/** Marcador para "a página falhou ao responder" (distinto de timeout). */
+const SIMBOLO_FALHA = Symbol('falha-metadados');
+
+/**
  * Normaliza a `mediaKey` do WhatsApp (32 bytes).
  * @param {string|Buffer} chave base64 ou Buffer
  * @returns {Buffer|null}
@@ -186,41 +196,72 @@ export async function baixarMidiaForaDoNavegador({
  * `downloadMedia`, que devolve a imagem inteira em base64 e faz o wa-js
  * decodificar tudo no renderer.
  *
+ * ⚠️ `timeoutMs` é **prazo real**: se a página travar (frame morto, renderer
+ * bloqueado), o `page.evaluate` fica pendurado até o `protocolTimeout` do
+ * Puppeteer (120 s). Sem o prazo próprio, o fallback da FEAT-019 travaria a
+ * oferta por 2 minutos em vez de seguir a cascata.
+ *
  * @param {{waPage?:{evaluate:Function}}} client
  * @param {string} msgId
- * @param {{timeoutMs?:number}} [opcoes]
+ * @param {{timeoutMs?:number, corrida?:Function}} [opcoes]
  * @returns {Promise<object|null>}
  */
-export async function metadadosNaPagina(client, msgId, { timeoutMs = 15_000 } = {}) {
+export async function metadadosNaPagina(
+  client,
+  msgId,
+  // `corrida` recebe uma FUNCAO: `Promise.race` como valor padrao perde o
+  // binding do construtor e devolve undefined em vez do resultado da corrida.
+  { timeoutMs = 15_000, corrida = (promessas) => Promise.race(promessas) } = {},
+) {
   const page = client?.waPage;
   if (!page?.evaluate || !msgId) return null;
 
+  const consulta = (async () => {
+    try {
+      return await page.evaluate(
+        async (id) => {
+          const msg = await window.WPP.chat.getMessageById(id);
+          const midia =
+            msg?.mediaData ||
+            msg?.message?.imageMessage ||
+            msg?.message?.videoMessage ||
+            {};
+          if (!midia?.directPath) return null;
+          const paraBase64 = (v) => {
+            if (!v) return null;
+            if (typeof v === 'string') return v;
+            const u8 = v instanceof Uint8Array ? v : new Uint8Array(v);
+            return btoa(String.fromCharCode(...u8));
+          };
+          return {
+            directPath: midia.directPath || null,
+            mediaKey: paraBase64(midia.mediaKey),
+            mimetype: midia.mimetype || null,
+          };
+        },
+        msgId,
+      );
+    } catch {
+      // Página morta/lenta: sem metadados, o chamador segue a cascata.
+      return SIMBOLO_FALHA;
+    }
+  })();
+
+  let prazo;
+  const limite = new Promise((resolver) => {
+    prazo = setTimeout(() => resolver(SIMBOLO_TIMEOUT), timeoutMs);
+  });
+
   try {
-    const bruto = await page.evaluate(
-      async (id) => {
-        const msg = await window.WPP.chat.getMessageById(id);
-        const midia =
-          msg?.mediaData || msg?.message?.imageMessage || msg?.message?.videoMessage || {};
-        if (!midia?.directPath) return null;
-        const paraBase64 = (v) => {
-          if (!v) return null;
-          if (typeof v === 'string') return v;
-          const u8 = v instanceof Uint8Array ? v : new Uint8Array(v);
-          return btoa(String.fromCharCode(...u8));
-        };
-        return {
-          directPath: midia.directPath || null,
-          mediaKey: paraBase64(midia.mediaKey),
-          mimetype: midia.mimetype || null,
-        };
-      },
-      msgId,
-    );
-    return bruto;
+    const r = await corrida([consulta, limite]);
+    if (r === SIMBOLO_TIMEOUT || r === SIMBOLO_FALHA) return null;
+    return r;
   } catch {
     return null;
   } finally {
-    // sem estado para limpar; o timeout é do chamador
-    void timeoutMs;
+    clearTimeout(prazo);
+    // A promessa perdedora pode rejeitar depois; evita "unhandled rejection".
+    consulta.catch(() => {});
   }
 }
+

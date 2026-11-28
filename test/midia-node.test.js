@@ -189,3 +189,71 @@ test('CA-4: erro no evaluate é engolido (fallback segue)', async () => {
   };
   assert.equal(await metadadosNaPagina(client, 'msg-1'), null);
 });
+
+/* ============ CA-5: o navegador TRAVADO (o cenário real de produção) ============ */
+
+test('CA-5: página travada não pendura o pipeline — o prazo vence', async () => {
+  // Simula o renderer morto: page.evaluate nunca resolve (nem rejeita).
+  const client = {
+    waPage: { evaluate: () => new Promise(() => {}) },
+  };
+
+  const inicio = Date.now();
+  const meta = await metadadosNaPagina(client, 'msg-travada', { timeoutMs: 80 });
+  const gasto = Date.now() - inicio;
+
+  assert.equal(meta, null, 'sem metadados, o fallback segue');
+  assert.ok(gasto < 500, `não pode esperar o protocolTimeout de 120s (gastou ${gasto}ms)`);
+});
+
+test('CA-5: evaluate que LANÇA (detached Frame) devolve null na hora', async () => {
+  const client = {
+    waPage: {
+      evaluate: () => {
+        throw new Error("Attempted to use detached Frame 'ABC'");
+      },
+    },
+  };
+  assert.equal(await metadadosNaPagina(client, 'msg-x'), null);
+});
+
+test('CA-5: navegador travado + metadados ok = imagem chega ao fim', async () => {
+  // Cadeia completa: downloadMedia falhou, página demora mas responde metadados,
+  // Node baixa e descriptografa — exatamente o cenário da VPS.
+  const original = Buffer.from('FOTO-DO-PRODUTO'.repeat(200));
+  const arquivo = arquivoDoWhatsApp(original, CHAVE);
+  const chaveB64 = CHAVE.toString('base64');
+
+  const client = {
+    waPage: {
+      evaluate: async () =>
+        new Promise((r) =>
+          setTimeout(
+            () =>
+              r({ directPath: '/v/abc.enc', mediaKey: chaveB64, mimetype: 'image/jpeg' }),
+            10,
+          ),
+        ),
+    },
+  };
+
+  const meta = await metadadosNaPagina(client, 'msg-ok', { timeoutMs: 2000 });
+  assert.ok(meta?.directPath, 'metadados vieram');
+
+  const baixada = await baixarMidiaForaDoNavegador({
+    metadados: meta,
+    http: async () => ({
+      ok: true,
+      status: 200,
+      arrayBuffer: async () =>
+        arquivo.buffer.slice(arquivo.byteOffset, arquivo.byteOffset + arquivo.byteLength),
+    }),
+  });
+
+  assert.equal(baixada.motivo, null);
+  assert.equal(
+    Buffer.from(baixada.base64.split(',')[1], 'base64').toString(),
+    original.toString(),
+    'a imagem volta idêntica mesmo com o navegador lento',
+  );
+});
