@@ -132,3 +132,27 @@ indefinidamente e ocupa disco no VPS.
 
 **Impacto:** baixo no curto prazo (disco do VPS tem 41 G livres), alto no longo (um ano sem rotação
 são centenas de MB e um `grep` lento na hora do incidente).
+
+---
+
+## DT-010 · Duas premissas do download em Node (FEAT-019) não validadas
+
+**Status:** aberto — só se confirma com o app conectado ao WhatsApp.
+
+A FEAT-019 baixa a mídia fora do Chromium, mas depende de dois fatos que **não
+foram testados contra o WhatsApp real** (foram simulados com fakes):
+
+| # | Premissa | Se falhar |
+| :--- | :--- | :--- |
+| 1 | `WPP.chat.getMessageById(id)` devolve `mediaData.directPath` **e** `mediaData.mediaKey` nesses nomes | `metadadosNaPagina` devolve `null` e o fallback **nunca aciona** |
+| 2 | `https://mmg.whatsapp.net<directPath>` aceita `GET` sem cabeçalho de autenticação | download retorna `http-4xx` e a cascata segue para o site |
+
+**O que está garantido apesar delas:** a oferta nunca é perdida — falha em
+qualquer etapa cai na cascata (site → plano B → placeholder), com motivo no log.
+
+**Como validar:** com o app conectado, mandar uma oferta com foto e procurar no log:
+```
+🖼️ Foto baixada FORA do Chromium (… KB) — wa-js não processou a imagem.
+```
+Se aparecer `metadados-incompletos` ou `http-4xx`, a premissa correspondente é falsa
+— e a correção é ajustar o nome do campo (1) ou adicionar o header de auth (2).
