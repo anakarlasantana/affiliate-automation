@@ -24,15 +24,15 @@
     "reset-sessao": "rm -rf tokens"
   },
   "dependencies": {
-    "@wppconnect-team/wppconnect": "2.4.7",
+    "@wppconnect-team/wppconnect": "2.3.3",
+    "@wppconnect/wa-js": "4.6.0",
     "axios": "^1.7.4",
     "better-sqlite3": "^11.3.0",
     "dotenv": "^16.4.5",
     "telegram": "^2.26.3"
   },
   "overrides": {
-    "puppeteer": "^25.11.0",
-    "puppeteer-core": "^25.11.0"
+    "@wppconnect/wa-js": "4.6.0"
   },
   "engines": {
     "node": ">=18"
