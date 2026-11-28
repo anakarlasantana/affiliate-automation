@@ -51,13 +51,25 @@ export const DATA_DIR = path.join(ROOT_DIR, 'data');
 export const TOKENS_DIR = path.join(ROOT_DIR, 'tokens');
 /**
  * Foto fixa enviada quando a oferta cai no nivel "placeholder" da cascata
- * (sem foto na mensagem e sem og:image no site). Versionada em
+ * (sem foto na mensagem, no site e nem plano B). Versionada em
  * assets/placeholder-confira-produto.png; PLACEHOLDER_IMAGEM permite
  * apontar para outra arte sem mexer no codigo.
+ *
+ * FEAT-017: caminho absoluto que não existe (ex.: copiado do notebook) cai no
+ * padrão relativo à raiz — em produção o `.env` apontava para
+ * `/home/sn-…/assets/…`, e o app passava a usar um genérico de emergência.
  */
-export const PLACEHOLDER_PATH =
-  (process.env.PLACEHOLDER_IMAGEM || '').trim() ||
-  path.join(ROOT_DIR, 'assets', 'placeholder-confira-produto.png');
+export const PLACEHOLDER_PATH = (() => {
+  const configurado = (process.env.PLACEHOLDER_IMAGEM || '').trim();
+  const padrao = path.join(ROOT_DIR, 'assets', 'placeholder-confira-produto.png');
+  if (configurado && fs.existsSync(configurado)) return configurado;
+  if (configurado) {
+    console.warn(
+      `   ⚠️  PLACEHOLDER_IMAGEM aponta para arquivo inexistente (${configurado}) — usando ${padrao}`,
+    );
+  }
+  return padrao;
+})();
 for (const dir of [DATA_DIR, TOKENS_DIR]) {
   try {
     fs.mkdirSync(dir, { recursive: true });

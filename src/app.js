@@ -71,6 +71,8 @@ import {
   processosDoApp,
 } from "./instancia.js";
 import { resolverPreco } from "./midia/preco.js";
+import { linhaDaFoto } from "./midia/cascata-foto.js";
+import { idDaOferta, linhaDeFluxo, motivoInvalida, resumoDoFluxo } from "./midia/fluxo-log.js";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -134,6 +136,8 @@ async function processarOferta(
   origemFotoMidia = null,
 ) {
   try {
+    const idFoto = idDaOferta(textoOriginal, origem);
+    console.log(linhaDeFluxo({ id: idFoto, etapa: 'inicio', status: 'ok', detalhe: `origem=${origem}` }));
     // Percorre TODOS os links da mensagem ate achar um link de produto
     // convertivel. Links de perfil grupal (meli.la -> /social/...), landing
     // pages e links sem afiliacao sao pulados.
@@ -307,11 +311,37 @@ async function processarOferta(
     // (mensagem:body | mensagem:download | mensagem:miniatura) — assim o
     // `npm run status` mostra na hora se alguma oferta saiu degradada.
     let origemFoto = imagemBase64 ? origemFotoMidia || "mensagem" : null;
+    /**
+     * PLANO B (FEAT-017): a foto da mensagem nao e descartada pela regra — ela
+     * fica guardada para o caso de o site do produto tambem nao entregar foto.
+     * Antes, FONTES_FOTO_SOMENTE_SITE + site bloqueado (captcha do ML) = oferta
+     * enviada com placeholder, jogando fora uma foto que ja estava na mao.
+     */
+    let fotoDaMensagem = imagemBase64;
+    let origemFotoDaMensagem = origemFotoMidia || "mensagem";
+    if (fotoDaMensagem) {
+      console.log(
+        linhaDeFluxo({
+          id: idFoto,
+          etapa: "foto-mensagem",
+          status: "ok",
+          detalhe: `fonte=${origemFotoDaMensagem} bytes=${String(fotoDaMensagem).length}`,
+        }),
+      );
+    }
     /** Resposta do site: traz `titulo` e `preco` lidos da própria página. */
     let pagina = null;
     if (imagemBase64 && origemSoFotoSite(origem)) {
       console.log(
-        `   🖼️  [${origem}] foto da mensagem ignorada por regra (FONTES_FOTO_SOMENTE_SITE) — buscando no site do produto.`,
+        `   🖼️  [${origem}] foto da mensagem preterida por regra (FONTES_FOTO_SOMENTE_SITE) — buscando no site; ela vira plano B.`,
+      );
+      console.log(
+        linhaDeFluxo({
+          id: idFoto,
+          etapa: "regra-so-site",
+          status: "preterida",
+          detalhe: "foto guardada como plano B",
+        }),
       );
       imagemBase64 = null;
       origemFoto = null;
@@ -406,6 +436,18 @@ async function processarOferta(
     }
     if (!imagemBase64) {
       // Nivel 3: garante que a oferta SEMPRE tenha foto (nunca descarta).
+      // PLANO B (FEAT-017): antes de cair no placeholder, a foto da mensagem
+      // volta — ela foi preterida pela regra FONTES_FOTO_SOMENTE_SITE, não
+      // descartada. Sem isso, site bloqueado (captcha do ML) = placeholder.
+      if (fotoDaMensagem) {
+        imagemBase64 = fotoDaMensagem;
+        origemFoto = origemFotoDaMensagem;
+        console.log(
+          `   🖼️  foto da mensagem reassumida (plano B) — site/API não entregaram imagem.`,
+        );
+      }
+    }
+    if (!imagemBase64) {
       const ph = placeholderPara(loja);
       imagemBase64 = ph.base64;
       origemFoto = ph.origem;
@@ -413,6 +455,28 @@ async function processarOferta(
         `   🖼️  Placeholder [${loja}] aplicado — oferta mantida com foto generica.`,
       );
     }
+
+    // CA-8: uma linha por oferta dizendo de onde veio a foto e em que tamanho.
+    console.log(
+      `   ${linhaDaFoto(
+        { base64: imagemBase64, origem: origemFoto },
+        dimensoesImagem,
+        (b64) => ({ kb: Math.round((String(b64).length * 3) / 4 / 1024) }),
+      )}`,
+    );
+    // FEAT-017: resumo do fluxo — permite filtrar UMA oferta inteira no servidor
+    // com `grep '#<id>'` e ver onde ela degradou.
+    console.log(
+      resumoDoFluxo({
+        id: idFoto,
+        etapas: {
+          foto: imagemBase64 ? origemFoto : "nenhuma",
+          preco: precoResolvido?.atual ?? "sem-preco",
+          pagina: pagina?.preco ? "com-preco" : "sem-preco",
+          story: origemFoto === "placeholder" ? "nao" : "sim",
+        },
+      }),
+    );
 
     // Identidade do produto: usada no dedup, no link curto e na API de preço.
     const chaveAcervo = chaveProduto(urlLimpa) || chaveProduto(meuLink || "");
@@ -1637,12 +1701,32 @@ async function main() {
       loja,
     }) => {
       // Garantia final: se algo chegou sem imagem (fila antiga), usa placeholder.
-      if (!imagemBase64 || !validarImagemBase64(String(imagemBase64)).valido) {
+      // FEAT-017: a troca NAO pode ser silenciosa — antes, uma foto boa trocada
+      // aqui nao deixava rastro nenhum no log (foi o bug de 28/11).
+      const motivoTroca = motivoInvalida(validarImagemBase64, imagemBase64);
+      if (motivoTroca) {
         const ph = placeholderPara(loja);
+        console.log(
+          linhaDeFluxo({
+            id: idDaOferta(chaveFinal, loja),
+            etapa: "envio",
+            status: "placeholder",
+            detalhe: `motivo=${motivoTroca} · origem-que-chegou=${origemFoto || "?"}`,
+          }),
+        );
         imagemBase64 = ph.base64;
         origemFoto = ph.origem;
         console.log(
           `   🖼️  Placeholder [${loja || "?"}] aplicado no envio — oferta mantida com foto.`,
+        );
+      } else {
+        console.log(
+          linhaDeFluxo({
+            id: idDaOferta(chaveFinal, loja),
+            etapa: "envio",
+            status: "foto-real",
+            detalhe: `fonte=${origemFoto || "?"} · ${Math.round((String(imagemBase64).length * 3) / 4 / 1024)}KB`,
+          }),
         );
       }
       const legenda = legendaParaFoto(mensagemFinal, meuLink || urlLimpa);
