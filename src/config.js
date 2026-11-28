@@ -248,6 +248,14 @@ const config = {
     webVersion: process.env.WHATSAPP_WEB_VERSION || 'auto',
     /** Segundos que a pagina espera o QR ser escaneado (0 = nunca fecha) */
     timeoutQrMs: Math.max(0, parseInt(process.env.WPP_TIMEOUT_QR || '300', 10)) * 1000,
+    /**
+     * FEAT-019: baixar a midia FORA do Chromium quando o downloadMedia falhar.
+     *
+     * O `downloadMedia` do wppconnect roda dentro da pagina e o wa-js decodifica
+     * a imagem no renderer (`prepRawMedia`) — na VPS isso estoura
+     * `Runtime.callFunctionOn`. Ligado por padrao; `MIDIA_NO_NODE=0` desliga.
+     */
+    midiaNoNode: !/^(0|false|nao|off)$/i.test(process.env.MIDIA_NO_NODE || ''),
     /** Segundos maximos aguardando a sincronizacao do dispositivo (backlog) */
     deviceSyncMs: Math.max(0, parseInt(process.env.WPP_DEVICE_SYNC_TIMEOUT || '900', 10)) * 1000,
     /** Tentativas de conexao antes de desistir */

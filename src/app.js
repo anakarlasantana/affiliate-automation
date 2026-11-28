@@ -72,6 +72,7 @@ import {
 } from "./instancia.js";
 import { resolverPreco } from "./midia/preco.js";
 import { linhaDaFoto } from "./midia/cascata-foto.js";
+import { baixarMidiaForaDoNavegador, metadadosNaPagina } from "./whatsapp/midia-node.js";
 import { idDaOferta, linhaDeFluxo, motivoInvalida, resumoDoFluxo } from "./midia/fluxo-log.js";
 import fs from "node:fs";
 import os from "node:os";
@@ -1244,6 +1245,38 @@ async function iniciarWhatsApp() {
               imagemBase64 = dl.base64;
               origemFotoMidia = "mensagem:download";
               console.log(`   🖼️  Foto baixada da mensagem (${classe.motivo}).`);
+            }
+          }
+
+          // 2c) FEAT-019: download FORA do Chromium.
+          // O `downloadMedia` do wppconnect roda `evaluateAndReturn` e faz o wa-js
+          // decodificar/reencodar a imagem DENTRO da página (`prepRawMedia`). Na
+          // VPS isso estoura `Runtime.callFunctionOn` mesmo com a máquina ociosa.
+          // Aqui a página só entrega metadados (directPath + mediaKey) e o Node
+          // baixa e descriptografa — sem o renderer processar imagem.
+          if (!imagemBase64 && config.whatsapp.midiaNoNode !== false) {
+            const alvo = candidatos[0];
+            if (alvo) {
+              const meta = await metadadosNaPagina(client, alvo);
+              if (meta?.directPath) {
+                const baixada = await baixarMidiaForaDoNavegador({
+                  metadados: meta,
+                });
+                if (baixada.base64) {
+                  const v = validarImagemBase64(String(baixada.base64));
+                  if (v.valido) {
+                    imagemBase64 = baixada.base64;
+                    origemFotoMidia = "mensagem:node";
+                    console.log(
+                      `   🖼️  Foto baixada FORA do Chromium (${v.kb} KB) — wa-js não processou a imagem.`,
+                    );
+                  }
+                } else {
+                  console.warn(
+                    `   ↷ download em Node falhou (${baixada.motivo}) — seguindo o fallback.`,
+                  );
+                }
+              }
             }
           }
         }
