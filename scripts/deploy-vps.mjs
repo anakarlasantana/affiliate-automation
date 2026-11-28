@@ -117,6 +117,16 @@ if (rollback) {
   log('\n✅ rollback concluído — confira: journalctl -u affiliate-automation -n 40');
   process.exit(0);
 }
+passo(0, 'ferramentas obrigatórias no servidor (rsync, ffmpeg, caddy)');
+// O deploy USA rsync (backup e envio) — faltava validar justamente ele.
+ssh(
+  'command -v rsync >/dev/null || { echo "rsync AUSENTE"; exit 1; }; ' +
+    'command -v ffmpeg >/dev/null || { echo "ffmpeg AUSENTE"; exit 1; }; ' +
+    'command -v caddy >/dev/null || { echo "caddy AUSENTE"; exit 1; }; ' +
+    'rsync --version | head -1; ffmpeg -version | head -1; caddy version',
+);
+log('    (instalar com: sudo apt install -y rsync ffmpeg caddy)');
+
 passo(1, 'backup do banco + cópia do código atual');
 const carimbo = new Date().toISOString().slice(0, 16).replace(/[:T]/g, '-');
 const backupBanco = `${alvo}/data/ofertas.db.bak.${carimbo}`;
@@ -133,6 +143,10 @@ if (aplicar) {
     'rsync',
     [
       '-a',
+      // O destino é do usuário `affiliate` e o SSH é do `ubuntu`: sem subir o
+      // rsync remoto com sudo, o envio morre em "Permission denied" no /opt.
+      '--rsync-path',
+      'sudo -n rsync',
       '-e',
       `ssh -i ${chave} -o BatchMode=yes`,
       ...exclusoesRsync(),
