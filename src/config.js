@@ -4,6 +4,36 @@
  * Qualquer novo afiliado/genérico deve ser lido aqui.
  */
 import 'dotenv/config';
+
+/**
+ * Valor de uma variável de ambiente, **saneado**.
+ *
+ * POR QUÊ existe: o `dotenv` NÃO remove comentário no fim da linha — em
+ * `IG_ACCESS_TOKEN=EAG...ZDZD   # token (~60d)` o valor chega com o comentário
+ * grudado. Isso quebrou a autenticação da Meta em 27/11 (400 "invalid token")
+ * sem erro de código: o app enviava `"EAG...ZDZD   # token (~60d)"`.
+ *
+ * Corta tudo a partir de `#`, tira espaços nas pontas e remove aspas que
+ * envolvam o valor inteiro. O `.env` continua podendo explicar a variável na
+ * mesma linha.
+ *
+ * @param {string} nome
+ * @param {string} [padrao]
+ * @returns {string}
+ */
+export function valorEnv(nome, padrao = '') {
+  const bruto = process.env[nome];
+  if (bruto === undefined) return padrao;
+
+  let valor = String(bruto).split('#')[0].trim();
+  const entreAspas =
+    valor.length >= 2 &&
+    ((valor.startsWith('"') && valor.endsWith('"')) ||
+      (valor.startsWith("'") && valor.endsWith("'")));
+  if (entreAspas) valor = valor.slice(1, -1).trim();
+
+  return valor === '' ? padrao : valor;
+}
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -322,13 +352,13 @@ const config = {
   },
   instagram: {
     /** ID numérico da conta profissional (não é o @handle) */
-    userId: process.env.IG_USER_ID || '',
+    userId: valorEnv('IG_USER_ID'),
     /** Token de longa duração (System User = não expira) */
-    token: process.env.IG_ACCESS_TOKEN || '',
+    token: valorEnv('IG_ACCESS_TOKEN'),
     /** Segredo do app — só para validar a assinatura do webhook */
-    appSecret: process.env.IG_APP_SECRET || '',
+    appSecret: valorEnv('IG_APP_SECRET'),
     /** Token do handshake do webhook (`hub.verify_token`) */
-    verifyToken: process.env.IG_VERIFY_TOKEN || '',
+    verifyToken: valorEnv('IG_VERIFY_TOKEN'),
     graphVersion: process.env.IG_GRAPH_VERSION || 'v21.0',
     /** Kill switch da publicação de story (default: desligado) */
     publicarStories: /^(1|true|sim|on)$/i.test(process.env.PUBLICAR_STORIES || ''),
