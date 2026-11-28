@@ -176,6 +176,9 @@ export function criarPublicadorAutomatico({ cfg = config, avisar = () => {}, dep
         storiesPorPost: cfg.publicacao.storiesPorPost,
       },
     });
+    if (escolhido?.motivo) {
+      avisar(`Escolha do ciclo: ${escolhido.formato} (${escolhido.motivo})`);
+    }
 
     if (!escolhido) {
       avisar(`📊 ${PREFIXO} Ciclo: nada a publicar (teto atingido ou fila vazia)`);
